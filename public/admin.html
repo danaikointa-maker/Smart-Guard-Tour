@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Smart Guard Tour</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<div class="container-wide">
+
+  <div id="scr-login">
+    <div class="card" style="max-width:420px; margin:60px auto;">
+      <h1>🖥️ ระบบหลังบ้าน</h1>
+      <input id="lg-name" placeholder="ชื่อ" style="margin-bottom:10px;">
+      <input id="lg-pin" type="password" placeholder="รหัสผ่าน" style="margin-bottom:12px;">
+      <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <p class="muted">เดโม่: admin / admin123</p>
+    </div>
+  </div>
+
+  <div id="scr-main" class="hidden">
+    <h1>🛡️ Smart Guard Tour — Admin</h1>
+    <div class="tabs">
+      <button class="active" data-tab="live" onclick="switchTab('live',this)">🗺️ แผนที่สด</button>
+      <button data-tab="manage" onclick="switchTab('manage',this)">➕ ป้อม & จุดตรวจ</button>
+      <button data-tab="qr" onclick="switchTab('qr',this)">🎫 QR ป้อม</button>
+      <button data-tab="reports" onclick="switchTab('reports',this)">📋 กะ & รายงาน</button>
+      <button data-tab="notif" onclick="switchTab('notif',this)">🔔 กลุ่มแจ้งเตือน</button>
+    </div>
+
+    <div id="tab-live">
+      <div class="card"><b>🟢 ตำแหน่ง รปภ. แบบเรียลไทม์</b> <span class="muted">(อัปเดตจาก WebSocket — คลิกกะเพื่อดูเส้นทาง)</span></div>
+      <div id="map-admin"></div>
+      <div id="live-list"></div>
+    </div>
+
+    <div id="tab-manage" class="hidden">
+      <div class="row">
+        <div class="card">
+          <h2>➕ เพิ่มป้อม (คลิกบนแผนที่เพื่อเลือกพิกัด)</h2>
+          <input id="p-name" placeholder="ชื่อป้อม" style="margin-bottom:8px;">
+          <div class="row"><input id="p-lat" placeholder="lat" readonly><input id="p-lng" placeholder="lng" readonly>
+          <input id="p-radius" placeholder="รัศมี QR (ม.)" value="30" style="max-width:110px;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="addPost()">สร้างป้อม + QR</button>
+        </div>
+        <div class="card">
+          <h2>➕ เพิ่มจุดตรวจ</h2>
+          <input id="c-name" placeholder="ชื่อจุดตรวจ" style="margin-bottom:8px;">
+          <div class="row"><input id="c-lat" placeholder="lat" readonly><input id="c-lng" placeholder="lng" readonly>
+          <input id="c-radius" placeholder="รัศมี (ม.)" value="100" style="max-width:110px;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="addCheckpoint()">เพิ่มจุดตรวจ</button>
+        </div>
+      </div>
+      <div id="map-manage" style="height:380px;border-radius:14px;margin-bottom:14px;"></div>
+      <div class="row">
+        <div class="card"><h2>🚔 ป้อม</h2><div id="post-list"></div></div>
+        <div class="card"><h2>📍 จุดตรวจ</h2><div id="cp-list-admin"></div></div>
+      </div>
+    </div>
+
+    <div id="tab-qr" class="hidden">
+      <div class="card"><b>🎫 QR Code ของป้อม</b> <span class="muted">— ปริ้นติดที่ป้อมให้ รปภ. สแกน</span></div>
+      <div id="qr-list"></div>
+    </div>
+
+    <div id="tab-reports" class="hidden">
+      <div class="row">
+        <div class="card"><h2>🕐 กะล่าสุด</h2><div id="shift-list"></div></div>
+        <div class="card" style="flex:2;"><h2>📋 รายงานที่ส่งเข้ามา</h2><div id="report-list"></div></div>
+      </div>
+    </div>
+
+    <div id="tab-notif" class="hidden">
+      <div class="card">
+        <h2>🔔 ตั้งค่ากลุ่มแจ้งเตือน (LINE / Telegram)</h2>
+        <p class="muted">ใส่ Webhook URL ของกลุ่ม — ตัวอย่าง Telegram: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/sendMessage</code> ส่งเมื่อ <code>event_type = shift_report</code></p>
+        <div class="row">
+          <select id="n-event"><option value="shift_report">shift_report (รายงานจบกะ)</option><option value="sos">sos (ปุ่มฉุกเฉิน)</option></select>
+          <input id="n-label" placeholder="ชื่อกลุ่ม เช่น กลุ่มเวรกลางคืน">
+          <input id="n-url" placeholder="Webhook URL">
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addNotif()">บันทึกกลุ่ม</button>
+      </div>
+      <div class="card"><h2>กลุ่มที่ตั้งไว้</h2><div id="notif-list"></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-report" class="modal hidden">
+  <div class="box" style="max-width:640px; max-height:85vh; overflow:auto;">
+    <h2 id="mr-title">รายงาน</h2>
+    <div id="mr-body"></div>
+    <button class="btn-ghost" style="margin-top:12px; width:100%;" onclick="$('modal-report').classList.add('hidden')">ปิด</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/admin.js"></script>
+</body>
+</html>
