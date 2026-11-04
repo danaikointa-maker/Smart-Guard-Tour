@@ -16,6 +16,7 @@
       <input id="lg-name" placeholder="ชื่อ" style="margin-bottom:10px;">
       <input id="lg-pin" type="password" placeholder="รหัสผ่าน" style="margin-bottom:12px;">
       <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <button id="btn-sso" class="btn-ghost hidden" style="width:100%;margin-top:10px;"></button>
       <p class="muted">เดโม่: admin / admin123</p>
     </div>
   </div>
@@ -164,5 +165,7 @@
 <script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/maps.js"></script>
 <script src="/admin.js"></script>
+<script src="/sso.js"></script>
+<script>ssoMaybeShow("btn-sso", "lg-name", (j) => if(j.user.role!=='admin'&&j.user.role!=='supervisor'){alert('ต้องเป็น admin/หัวหน้า');return;}S.token=j.token;S.role=j.user.role;localStorage.setItem('sgt_admin_token',j.token);location.reload());</script>
 </body>
 </html>

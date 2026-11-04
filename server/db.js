@@ -104,6 +104,7 @@ function addCol(table, col, def) {
 addCol('notif_groups', 'channel', "TEXT NOT NULL DEFAULT 'webhook'");
 addCol('notif_groups', 'bot_token', "TEXT NOT NULL DEFAULT ''");
 addCol('notif_groups', 'chat_id', "TEXT NOT NULL DEFAULT ''");
+addCol('users', 'vva_user_id', "TEXT");
 
 const now = () => new Date().toISOString();
 const BASE = { lat: 13.7307, lng: 100.5418 }; // ลุมพินี (เดโม่)
@@ -175,6 +176,8 @@ if (userCount === 0) {
     ['map_lng', String(BASE.lng), 'แผนที่: ลองจิจูดเริ่มต้น'],
     ['map_zoom', '16', 'แผนที่: ซูมเริ่มต้น'],
     ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
+    ['sso_enabled', 'false', 'เปิด SSO ผ่านระบบ VVA (true/false)'],
+    ['sso_provider_name', 'VVA SSO', 'ชื่อผู้ให้บริการ SSO (แสดงบนหน้าล็อกอิน)'],
     ['map_tile_url', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 'แผนที่: Tile URL (Google Maps: https://mt{s}.google.com/vt/lyrs=m&hl=th&x={x}&y={y}&z={z}&key=YOUR_KEY)'],
   ];
   for (const s of seed) insSet.run(...s, now());

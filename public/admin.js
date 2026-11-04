@@ -20,7 +20,7 @@ async function doLogin() {
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
     if (j.user.role !== 'admin' && j.user.role !== 'supervisor') throw new Error('ต้องเป็นบัญชี admin หรือหัวหน้า รปภ.');
-    S.token = j.token; S.role = j.user.role; localStorage.setItem('sgt_admin_token', j.token);
+    S.token = j.token; S.role = j.user.role; localStorage.setItem('sgt_admin_token', j.token); localStorage.setItem('sgt_admin_role', j.user.role);
     $('scr-login').classList.add('hidden'); $('scr-main').classList.remove('hidden');
     if (S.role === 'supervisor') {
       // หัวหน้า รปภ.: เห็นเฉพาะแผนที่สด + รายงาน (อ่านอย่างเดียว ไม่ตั้งค่าได้)
@@ -326,3 +326,20 @@ function renderAudit() {
      <span class="muted">${a.ts.replace('T', ' ').slice(0, 19)} · ${a.detail || ''}</span></div></div>`).join('')
     || '<p class="muted">ยังไม่มีบันทึก</p>';
 }
+
+
+// auto-login ถ้ามี token ค้าง (เช่น เข้าผ่าน SSO แล้ว reload)
+(async () => {
+  if (!S.token) return;
+  try {
+    S.data = await api('/api/admin/overview');
+    $('scr-login').classList.add('hidden'); $('scr-main').classList.remove('hidden');
+    if (S.role === 'supervisor') {
+      document.querySelectorAll('.tabs button').forEach(b => {
+        if (!['live', 'reports', 'stats', 'audit'].includes(b.dataset.tab)) b.classList.add('hidden');
+      });
+    }
+    renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderUsers(); renderSchedules(); renderSettings(); renderAudit(); loadStats();
+    initLiveMap(); connectWS();
+  } catch (e) { localStorage.removeItem('sgt_admin_token'); localStorage.removeItem('sgt_admin_role'); }
+})();

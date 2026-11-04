@@ -15,6 +15,7 @@
       <input id="lg-name" placeholder="ชื่อ (เช่น ลูกบ้าน A)" style="margin-bottom:10px;">
       <input id="lg-pin" type="password" inputmode="numeric" placeholder="PIN" style="margin-bottom:12px;">
       <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <button id="btn-sso" class="btn-ghost hidden" style="width:100%;margin-top:10px;"></button>
     </div>
     <p class="muted">เดโม่: ลูกบ้าน A / 1234</p>
   </div>
@@ -30,5 +31,7 @@
 <script src="/vendor/leaflet/leaflet.js"></script>
 <script src="/maps.js"></script>
 <script src="/resident.js"></script>
+<script src="/sso.js"></script>
+<script>ssoMaybeShow("btn-sso", "lg-name", (j) => S.token=j.token;localStorage.setItem('sgt_res_token',j.token);location.reload());</script>
 </body>
 </html>

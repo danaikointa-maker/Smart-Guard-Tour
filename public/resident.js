@@ -51,3 +51,10 @@ function renderLiveMap(shifts) {
       .addTo(S.map).bindPopup(`🚶 ${s.guard_name}<br><small>${s.live.ts.slice(11, 19)} น.</small>`);
   }
 }
+
+(async () => {
+  if (!S.token) return;
+  const rr = await fetch('/api/resident/status', { headers: { 'x-token': S.token } });
+  if (rr.ok) { $('scr-login').classList.add('hidden'); $('scr-main').classList.remove('hidden'); load(); S.timer = setInterval(load, 10000); }
+  else localStorage.removeItem('sgt_res_token');
+})();

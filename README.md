@@ -15,6 +15,12 @@
 
 เอกสาร: [ออกแบบระบบ](docs/smart-guard-tour-design.md) · [สถาปัตยกรรม เอกสารออกแบบฉบับเต็ม: [`docs/smart-guard-tour-design.md`](docs/smart-guard-tour-design.md) โครงสร้างพัฒนาต่อ](docs/architecture.md)
 
+## 🔐 SSO ผ่าน VVA
+เปิดใน ⚙️ ตั้งค่า → `sso_enabled = true` แล้วหน้าล็อกอินทุกหน้าจะมีปุ่ม **🔐 เข้าด้วย SSO** — ต้นแบบจำลอง VVA ด้วย signed token (`/api/sso/mock-issue` → `/api/sso/login`, ผูกบัญชีด้วย `vva_user_id`) — โปรดักชันสลับเป็น OAuth2/OIDC จริงได้เลย
+
+## 📱 Native Mobile App (Flutter)
+โค้ดอยู่ที่ `apps/mobile/` — รองรับ **Background GPS ขณะล็อกจอ** (Foreground Service + `background_locator` ตามนโยบาย Google Play) + คิวออฟライン + SSO
+
 ## วิธีรัน
 ```bash
 npm install

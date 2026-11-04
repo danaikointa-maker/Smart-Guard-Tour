@@ -18,6 +18,7 @@
       <input id="lg-name" placeholder="ชื่อ (เช่น สมชาย)" style="margin-bottom:10px;">
       <input id="lg-pin" type="password" inputmode="numeric" placeholder="PIN 4 หลัก" style="margin-bottom:12px;">
       <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <button id="btn-sso" class="btn-ghost hidden" style="width:100%;margin-top:10px;"></button>
     </div>
     <p class="muted">เดโม่: สมชาย / 1234 หรือ วันดี / 1234</p>
   </div>
@@ -107,5 +108,7 @@
 <script src="/maps.js"></script>
 <script src="/vendor/jsqr/jsQR.js"></script>
 <script src="/guard.js"></script>
+<script src="/sso.js"></script>
+<script>ssoMaybeShow("btn-sso", "lg-name", (j) => S.token=j.token;S.me=j.user;localStorage.setItem('sgt_token',j.token);toast('เข้าระบบผ่าน SSO ✅ '+j.user.name);goScanIn());</script>
 </body>
 </html>

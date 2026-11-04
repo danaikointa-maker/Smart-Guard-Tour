@@ -31,6 +31,55 @@ function audit(actor, action, detail) {
     .run(now(), String(actor), action, typeof detail === 'string' ? detail : JSON.stringify(detail || {})); } catch {}
 }
 
+
+// ---------- SSO ผ่านระบบ VVA ----------
+// ในโปรดักชัน: VVA redirect กลับมาพร้อม code → แลก token ที่ VVA → verify signature
+// ต้นแบบนี้จำลองด้วย signed token รูปแบบ vva:{base64(json)}:{hmac}
+function makeMockVvaToken(sub, name) {
+  const body = Buffer.from(JSON.stringify({ sub, name, iss: 'vva-sso', iat: Date.now() })).toString('base64url');
+  const sig = crypto.createHmac('sha256', SECRET_SSO).update(body).digest('base64url').slice(0, 24);
+  return `vva:${body}:${sig}`;
+}
+const SECRET_SSO = process.env.VVA_SSO_SECRET || 'vva-dev-secret';
+
+// หน้าเว็บกดปุ่ม "เข้าด้วย SSO" → ระบบจำลองว่า VVA ออก token ให้ (โหมดเดโม่)
+app.get('/api/sso/mock-issue', (req, res) => {
+  const enabled = db.prepare("SELECT value FROM settings WHERE key='sso_enabled'").get();
+  if (!enabled || enabled.value !== 'true') return res.status(403).json({ error: 'ยังไม่เปิดใช้งาน SSO' });
+  const name = String(req.query.name || 'สมชาย');
+  const u = db.prepare('SELECT * FROM users WHERE name=?').get(name);
+  if (!u) return res.status(404).json({ error: 'ไม่พบบัญชี ' + name + ' — สร้างในแท็บผู้ใช้ก่อน' });
+  res.json({ vva_token: makeMockVvaToken(String(u.id), u.name), provider: 'VVA SSO (mock)' });
+});
+
+// callback: รับ token จาก VVA, verify, map/create user, ออก token ระบบเรา
+app.post('/api/sso/login', (req, res) => {
+  const { vva_token } = req.body || {};
+  const enabled = db.prepare("SELECT value FROM settings WHERE key='sso_enabled'").get();
+  if (!enabled || enabled.value !== 'true') return res.status(403).json({ error: 'ยังไม่เปิดใช้งาน SSO' });
+  const m = /^vva:([A-Za-z0-9_-]+):([A-Za-z0-9_-]+)$/.exec(String(vva_token || ''));
+  if (!m) return res.status(400).json({ error: 'รูปแบบ token ไม่ถูกต้อง' });
+  const expect = crypto.createHmac('sha256', SECRET_SSO).update(m[1]).digest('base64url').slice(0, 24);
+  if (expect !== m[2]) return res.status(401).json({ error: 'token ปลอมหรือหมดอายุ' });
+  let payload;
+  try { payload = JSON.parse(Buffer.from(m[1], 'base64url').toString()); } catch { return res.status(400).json({ error: 'tokenใช้ไม่ได้' }); }
+  let user = db.prepare('SELECT * FROM users WHERE vva_user_id=?').get(payload.sub);
+  if (!user) {
+    // ผูกบัญชีเดิมด้วยชื่อ หรือสร้างใหม่ (บทบาทเริ่มต้น = guard)
+    user = db.prepare('SELECT * FROM users WHERE name=?').get(payload.name);
+    if (user) db.prepare('UPDATE users SET vva_user_id=? WHERE id=?').run(payload.sub, user.id);
+    else {
+      const info = db.prepare('INSERT INTO users(name,pin,role,vva_user_id) VALUES(?,?,?,?)')
+        .run(payload.name, crypto.randomBytes(3).toString('hex'), 'guard', payload.sub);
+      user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
+    }
+  }
+  audit(payload.name, 'sso_login', { provider: payload.iss });
+  const token = crypto.randomBytes(24).toString('hex');
+  tokens.set(token, { userId: user.id, role: user.role, name: user.name });
+  res.json({ token, user: { id: user.id, name: user.name, role: user.role }, via: 'sso' });
+});
+
 // ---------- auth ----------
 app.post('/api/login', (req, res) => {
   const { name, pin } = req.body || {};
