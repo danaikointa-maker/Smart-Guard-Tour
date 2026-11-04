@@ -123,10 +123,10 @@ settings(key, value, label)                            ← GPS interval, radii, 
 
 | สถานะ | งาน |
 |---|---|
-| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด |
+| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด, **ออฟラインซิงก์**, **แดชบอร์ดสถิติ+audit log**, สลับ tile แผนที่ (Google Maps) |
 | 🔲 ต่อไป | **Flutter native app** (background GPS ตามนโยบาย Google Play) |
 | 🔲 ต่อไป | SSO ผ่านระบบ VVA (ตอนนี้ PIN ชั่วคราว) |
-| 🔲 ต่อไป | PostgreSQL+PostGIS, รูปเข้า S3/MinIO, ซูม map เป็น Google Maps (ใส่ API key) |
+| 🔲 ต่อไป | PostgreSQL+PostGIS, รูปเข้า S3/MinIO, Google Maps JS API เต็มรูปแบบ (marker แบบ native) |
 | 🔲 ต่อไป | โหมดออฟライン (คิวในเครื่อง sync อัตโนมัติ) |
 | 🔲 ต่อไป | Dashboard สถิติ/Heatmap, ส่งออก PDF, audit log UI |
 | 🔲 ต่อไป | แจ้งเตือน push ในแอป, 2-person verification จุดสำคัญ |

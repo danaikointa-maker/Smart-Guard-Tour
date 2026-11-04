@@ -31,6 +31,8 @@
       <button data-tab="schedules" onclick="switchTab('schedules',this)">🕐 ตารางเวร</button>
       <button data-tab="notif" onclick="switchTab('notif',this)">🔔 กลุ่มแจ้งเตือน</button>
       <button data-tab="settings" onclick="switchTab('settings',this)">⚙️ ตั้งค่า</button>
+      <button data-tab="stats" onclick="switchTab('stats',this)">📊 สถิติ</button>
+      <button data-tab="audit" onclick="switchTab('audit',this)">📜 บันทึก</button>
     </div>
 
     <div id="tab-live">
@@ -77,16 +79,75 @@
 
     <div id="tab-notif" class="hidden">
       <div class="card">
-        <h2>🔔 ตั้งค่ากลุ่มแจ้งเตือน (LINE / Telegram)</h2>
-        <p class="muted">ใส่ Webhook URL ของกลุ่ม — ตัวอย่าง Telegram: <code>https://api.telegram.org/bot&lt;TOKEN&gt;/sendMessage</code> ส่งเมื่อ <code>event_type = shift_report</code></p>
+        <h2>🔔 ตั้งค่ากลุ่มแจ้งเตือน</h2>
+        <p class="muted">เลือกช่องทาง: <b>Telegram</b> = ใส่ Bot Token + Chat ID · <b>LINE</b> = ใส่ Channel Access Token + Chat/Group ID · <b>Webhook</b> = ใส่ URL ใดก็ได้ — ส่งเมื่อ <code>event_type</code> ตรงกัน</p>
         <div class="row">
-          <select id="n-event"><option value="shift_report">shift_report (รายงานจบกะ)</option><option value="sos">sos (ปุ่มฉุกเฉิน)</option></select>
+          <select id="n-event"><option value="shift_report">shift_report (รายงานจบกะ)</option><option value="sos">sos (ปุ่มฉุกเฉิน)</option><option value="missed_checkpoint">missed_checkpoint (จุดที่ขาด)</option></select>
           <input id="n-label" placeholder="ชื่อกลุ่ม เช่น กลุ่มเวรกลางคืน">
+          <select id="n-channel" onchange="toggleNotifFields()">
+            <option value="webhook">Webhook URL</option>
+            <option value="telegram">Telegram Bot</option>
+            <option value="line">LINE Messaging API</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:8px;">
           <input id="n-url" placeholder="Webhook URL">
+          <input id="n-token" placeholder="Bot Token / Access Token" class="hidden">
+          <input id="n-chat" placeholder="Chat ID / Group ID" class="hidden">
         </div>
         <button class="btn-primary" style="margin-top:8px;" onclick="addNotif()">บันทึกกลุ่ม</button>
       </div>
       <div class="card"><h2>กลุ่มที่ตั้งไว้</h2><div id="notif-list"></div></div>
+    </div>
+
+    <div id="tab-users" class="hidden">
+      <div class="card">
+        <h2>👥 เพิ่มผู้ใช้</h2>
+        <div class="row">
+          <input id="u-name" placeholder="ชื่อ">
+          <input id="u-pin" placeholder="PIN" inputmode="numeric">
+          <select id="u-role">
+            <option value="guard">รปภ. (guard)</option>
+            <option value="supervisor">หัวหน้า รปภ. (supervisor)</option>
+            <option value="resident">ลูกบ้าน (resident)</option>
+            <option value="admin">ผู้ดูแล (admin)</option>
+          </select>
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addUser()">เพิ่มผู้ใช้</button>
+      </div>
+      <div class="card"><h2>ผู้ใช้ทั้งหมด</h2><div id="user-list"></div></div>
+    </div>
+
+    <div id="tab-schedules" class="hidden">
+      <div class="card">
+        <h2>🕐 จัดตารางเวร</h2>
+        <div class="row">
+          <select id="sc-guard"></select>
+          <select id="sc-post"></select>
+          <input id="sc-date" type="date">
+          <input id="sc-start" type="time" value="06:00" style="max-width:110px;">
+          <input id="sc-end" type="time" value="14:00" style="max-width:110px;">
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addSchedule()">เพิ่มตารางเวร</button>
+      </div>
+      <div class="card"><h2>ตารางเวรที่ตั้งไว้</h2><div id="schedule-list"></div></div>
+    </div>
+
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <h2>⚙️ ตั้งค่าระบบ</h2>
+        <p class="muted">แก้ไขแล้วกดบันทึก — ค่าบางอย่างมีผลกับแอป รปภ. ทันที</p>
+        <div id="settings-list"></div>
+        <button class="btn-primary" style="margin-top:10px;" onclick="saveSettings()">💾 บันทึกการตั้งค่า</button>
+      </div>
+    </div>
+
+    <div id="tab-stats" class="hidden">
+      <div id="stats-body"></div>
+    </div>
+
+    <div id="tab-audit" class="hidden">
+      <div class="card"><h2>📜 บันทึกการใช้งาน (audit log) — 100 รายการล่าสุด</h2><div id="audit-list"></div></div>
     </div>
   </div>
 </div>
@@ -101,6 +162,7 @@
 
 <div id="toast"></div>
 <script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/maps.js"></script>
 <script src="/admin.js"></script>
 </body>
 </html>

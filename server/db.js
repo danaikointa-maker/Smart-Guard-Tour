@@ -80,6 +80,13 @@ CREATE TABLE IF NOT EXISTS settings(
   label TEXT NOT NULL DEFAULT '',
   updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS audit_logs(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  detail TEXT
+);
 CREATE TABLE IF NOT EXISTS shift_schedules(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   guard_id INTEGER NOT NULL,
@@ -168,6 +175,7 @@ if (userCount === 0) {
     ['map_lng', String(BASE.lng), 'แผนที่: ลองจิจูดเริ่มต้น'],
     ['map_zoom', '16', 'แผนที่: ซูมเริ่มต้น'],
     ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
+    ['map_tile_url', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 'แผนที่: Tile URL (Google Maps: https://mt{s}.google.com/vt/lyrs=m&hl=th&x={x}&y={y}&z={z}&key=YOUR_KEY)'],
   ];
   for (const s of seed) insSet.run(...s, now());
 }

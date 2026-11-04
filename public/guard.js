@@ -8,7 +8,8 @@ const show = (id) => { document.querySelectorAll('.container > div').forEach(d =
 const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: null, post: null,
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
   cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null,
-  cfg: { gps_interval_sec: 4 } };
+  cfg: { gps_interval_sec: 4 },
+  queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]') };
 
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': S.token },
@@ -72,7 +73,7 @@ async function doCheckin(qr) {
 async function startShift() {
   try {
     await api('/api/guard/start', { shiftId: S.shift.id });
-    connectWS(); startGPS(); initMap(); renderCpList(); show('scr-patrol');
+    connectWS(); startGPS(); initMap(); renderCpList(); show('scr-patrol'); flushQueue();
     toast('เริ่มติดตาม GPS แล้ว 📍');
   } catch (e) { toast(e.message); }
 }
@@ -81,6 +82,7 @@ async function startShift() {
 function connectWS() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   S.ws = new WebSocket(`${proto}://${location.host}/ws?token=${S.token}`);
+  S.ws.onopen = () => flushQueue();
   S.ws.onclose = () => setTimeout(connectWS, 3000);
 }
 function startGPS() {
@@ -97,15 +99,37 @@ function startGPS() {
 function sendPos() {
   if (!S.myPos || !S.shift) return;
   const msg = { type: 'pos', shiftId: S.shift.id, lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc };
-  if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(msg));
-  else api('/api/guard/position', { shiftId: S.shift.id, ...S.myPos }).catch(() => {});
+  if (S.ws && S.ws.readyState === 1) { S.ws.send(JSON.stringify(msg)); return; }
+  api('/api/guard/position', { shiftId: S.shift.id, ...S.myPos })
+    .catch(() => enqueue({ kind: 'pos', lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, ts: new Date().toISOString() }));
 }
+
+// ---------- โหมดออฟライン: คิวในเครื่อง + ซิงก์อัตโนมัติ ----------
+function enqueue(item) {
+  S.queue.push(item);
+  if (S.queue.length > 50) S.queue = S.queue.slice(-50);
+  localStorage.setItem('sgt_queue', JSON.stringify(S.queue));
+  $('mypos').textContent += ' 📴(คิว ' + S.queue.length + ')';
+}
+async function flushQueue() {
+  if (!S.queue.length || !S.shift) return;
+  const items = S.queue; S.queue = []; localStorage.setItem('sgt_queue', '[]');
+  try {
+    const j = await api('/api/guard/sync', {
+      positions: items.filter(i => i.kind === 'pos'),
+      visits: items.filter(i => i.kind === 'visit'),
+    });
+    toast(`📶 ซิงก์ข้อมูลออฟラインแล้ว: GPS ${j.positions} จุด, เช็คจุด ${j.visits_ok} สำเร็จ`);
+    if (j.visits_ok) location.reload();
+  } catch (e) { S.queue = items.concat(S.queue); localStorage.setItem('sgt_queue', JSON.stringify(S.queue)); }
+}
+window.addEventListener('online', flushQueue);
 
 // ---------- แผนที่ ----------
 function initMap() {
   if (S.map) return;
   S.map = L.map('gmap').setView([S.post.lat, S.post.lng], 17);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(S.map);
+  SGT.addTileLayer(S.map);
   L.marker([S.post.lat, S.post.lng]).addTo(S.map).bindPopup(`🚔 ${S.post.name}`);
   for (const cp of S.checkpoints) {
     const m = L.circleMarker([cp.lat, cp.lng], { radius: 9, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: 0.9 })
@@ -184,7 +208,11 @@ async function sendVisit() {
   } catch (e) {
     closeCam();
     if (e.status === 409) toast('⚠️ ' + e.message + ' — เดินเข้าใกล้จุดแล้วถ่ายใหม่');
-    else toast(e.message);
+    else if (!navigator.onLine || e.message === 'Failed to fetch') {
+      enqueue({ kind: 'visit', checkpointId: S.shotCp.id, lat: S.myPos.lat, lng: S.myPos.lng,
+        accuracy: S.myPos.acc, photo: S.shotData, ts: new Date().toISOString() });
+      toast('📴 ออฟไลน์ — เก็บรูปไว้ในเครื่องแล้ว จะส่งอัตโนมัติเมื่อเน็ตกลับมา');
+    } else toast(e.message);
     renderCpList();
   }
 }

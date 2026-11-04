@@ -26,6 +26,10 @@ function auth(req, res, next) {
   next();
 }
 const canView = (u) => u.role === 'admin' || u.role === 'supervisor'; // หัวหน้า รปภ. อ่านได้
+function audit(actor, action, detail) {
+  try { db.prepare('INSERT INTO audit_logs(ts,actor,action,detail) VALUES(?,?,?,?)')
+    .run(now(), String(actor), action, typeof detail === 'string' ? detail : JSON.stringify(detail || {})); } catch {}
+}
 
 // ---------- auth ----------
 app.post('/api/login', (req, res) => {
@@ -34,6 +38,7 @@ app.post('/api/login', (req, res) => {
   if (!row) return res.status(401).json({ error: 'ชื่อหรือ PIN ไม่ถูกต้อง' });
   const token = crypto.randomBytes(24).toString('hex');
   tokens.set(token, { userId: row.id, role: row.role, name: row.name });
+  audit(row.name, 'login', { role: row.role });
   res.json({ token, user: { id: row.id, name: row.name, role: row.role } });
 });
 
@@ -62,6 +67,7 @@ app.get('/api/admin/overview', auth, (req, res) => {
     ).all(),
     reports: db.prepare('SELECT * FROM reports ORDER BY id DESC LIMIT 50').all(),
     notif: db.prepare('SELECT * FROM notif_groups ORDER BY id').all(),
+    audit: db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100').all(),
   });
 });
 
@@ -75,6 +81,7 @@ app.put('/api/admin/settings', auth, (req, res) => {
     const r = upd.run(String(v), now(), k);
     if (r.changes > 0) n++;
   }
+  audit(req.user.name, 'settings_update', entries.map(([k]) => k).join(','));
   res.json({ ok: true, updated: n });
 });
 
@@ -86,6 +93,7 @@ app.post('/api/admin/users', auth, (req, res) => {
     return res.status(400).json({ error: 'กรอกชื่อ PIN และเลือกบทบาท (guard/supervisor/resident/admin)' });
   try {
     const info = db.prepare('INSERT INTO users(name,pin,role) VALUES(?,?,?)').run(name.trim(), String(pin), role);
+    audit(req.user.name, 'user_create', { id: info.lastInsertRowid, name, role });
     res.json({ id: info.lastInsertRowid });
   } catch (e) { res.status(409).json({ error: 'ชื่อนี้มีอยู่แล้ว' }); }
 });
@@ -133,6 +141,7 @@ app.post('/api/admin/posts', auth, async (req, res) => {
   const defR = db.prepare("SELECT value FROM settings WHERE key='default_post_radius_m'").get();
   const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,created_at) VALUES(?,?,?,?,?,?,?)');
   const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', now());
+  audit(req.user.name, 'post_create', { id: info.lastInsertRowid, name });
   const qr = await makePostQRWithPng(info.lastInsertRowid, name);
   db.prepare('UPDATE posts SET qr=?, qr_png=? WHERE id=?').run(qr.payload, qr.png, info.lastInsertRowid);
   res.json({ id: info.lastInsertRowid, qr: qr.payload, qr_png: qr.png });
@@ -154,6 +163,7 @@ app.post('/api/admin/checkpoints', auth, (req, res) => {
   const code = `CP-${String(count + 1).padStart(2, '0')}`;
   const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq) VALUES(?,?,?,?,?,?)');
   const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1);
+  audit(req.user.name, 'checkpoint_create', { code, name });
   res.json({ id: info.lastInsertRowid, code });
 });
 
@@ -257,6 +267,7 @@ app.post('/api/guard/checkin', auth, (req, res) => {
   const schedule = db.prepare(
     'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
   ).get(req.user.userId, today);
+  audit(req.user.name, 'checkin', { shift: shift.id, post: post.name });
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
   res.json({ shift, post, checkpoints, schedule });
 });
@@ -268,6 +279,7 @@ app.post('/api/guard/start', auth, (req, res) => {
   if (!s) return res.status(404).json({ error: 'ไม่พบกะนี้' });
   if (s.status === 'checked_out') return res.status(400).json({ error: 'กะนี้จบไปแล้ว' });
   db.prepare("UPDATE shifts SET status='patrolling', started_at=COALESCE(started_at,?) WHERE id=?").run(now(), s.id);
+  audit(req.user.name, 'shift_start', { shift: s.id });
   broadcast({ type: 'shift', shift: { ...db.prepare('SELECT * FROM shifts WHERE id=?').get(s.id), guard_name: req.user.name } });
   res.json({ ok: true, status: 'patrolling' });
 });
@@ -309,6 +321,7 @@ app.post('/api/guard/visit', auth, (req, res) => {
     'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)'
   ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, now());
   const visit = db.prepare('SELECT * FROM visits WHERE id=?').get(info.lastInsertRowid);
+  audit(req.user.name, inside ? 'visit_ok' : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist) });
   broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, dist: Math.round(dist), ts: visit.ts });
   if (!inside) {
     return res.status(409).json({
@@ -368,6 +381,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
   }
   db.prepare('UPDATE reports SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', reportId);
 
+  audit(req.user.name, 'checkout_report', { shift: s.id, report: reportId, visited: visits.length, total });
   broadcast({ type: 'report', reportId, guard: req.user.name, visited: visits.length, total });
   res.json({ ok: true, reportId, visited: visits.length, total, sent_to: sent });
 });
@@ -439,6 +453,7 @@ app.post('/api/guard/sos', auth, async (req, res) => {
 กะ #${s.id} · ${lat}, ${lng}
 แผนที่: ${mapsLink}
 เวลา ${now()}`;
+  audit(req.user.name, 'sos', { shift: s.id, lat, lng });
   broadcast({ type: 'sos', guard: req.user.name, shiftId: s.id, lat, lng, ts: now() });
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='sos'").all();
   const sent = [];
@@ -472,6 +487,67 @@ setInterval(() => {
     }
   } catch (e) { console.error('[alert]', e.message); }
 }, 60 * 1000);
+
+
+// ---------- admin: สถิติแดชบอร์ด ----------
+app.get('/api/admin/stats', auth, (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const q = (s) => db.prepare(s).get();
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    days.push({ date: d, shifts: db.prepare("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=?").get(d).c,
+      visits: db.prepare("SELECT COUNT(*) c FROM visits WHERE inside=1 AND substr(ts,1,10)=?").get(d).c });
+  }
+  const cpStats = db.prepare(
+    `SELECT c.code, c.name, COUNT(v.id) visited FROM checkpoints c
+     LEFT JOIN visits v ON v.checkpoint_id=c.id AND v.inside=1 GROUP BY c.id ORDER BY c.seq`).all();
+  const dur = db.prepare(
+    `SELECT AVG((julianday(checked_out_at)-julianday(COALESCE(started_at,checked_in_at)))*24*60) m
+     FROM shifts WHERE status='checked_out'`).get().m;
+  res.json({
+    totals: {
+      users: q('SELECT COUNT(*) c FROM users').c,
+      guards: q("SELECT COUNT(*) c FROM users WHERE role='guard'").c,
+      posts: q('SELECT COUNT(*) c FROM posts').c,
+      checkpoints: q('SELECT COUNT(*) c FROM checkpoints').c,
+      shifts_total: q('SELECT COUNT(*) c FROM shifts').c,
+      shifts_today: q("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=date('now')").c,
+      reports: q('SELECT COUNT(*) c FROM reports').c,
+      sos: q("SELECT COUNT(*) c FROM audit_logs WHERE action='sos'").c,
+      gps_points: q('SELECT COUNT(*) c FROM gps_tracks').c,
+    },
+    avg_shift_minutes: dur ? Math.round(dur) : null,
+    last7days: days,
+    checkpoint_stats: cpStats,
+  });
+});
+
+// ---------- guard: ซิงก์ออฟไลน์ (คิวในเครื่อง) ----------
+app.post('/api/guard/sync', auth, (req, res) => {
+  const { positions = [], visits = [] } = req.body || {};
+  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
+  let pOk = 0, vOk = 0, vFail = 0;
+  if (s) {
+    for (const p of positions) { if (isFinite(p.lat) && isFinite(p.lng)) { savePosition(s, p.lat, p.lng, p.accuracy); pOk++; } }
+    for (const v of visits) {
+      const cp = db.prepare('SELECT * FROM checkpoints WHERE id=?').get(v.checkpointId);
+      if (!cp) { vFail++; continue; }
+      const dist = haversineM(v.lat, v.lng, cp.lat, cp.lng);
+      const inside = dist <= cp.radius;
+      let photoPath = null;
+      if (v.photo && String(v.photo).startsWith('data:image')) {
+        const buf = Buffer.from(String(v.photo).split(',')[1], 'base64');
+        photoPath = `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
+        fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+      }
+      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)')
+        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, v.ts || now());
+      if (inside) vOk++; else vFail++;
+    }
+  }
+  res.json({ ok: true, positions: pOk, visits_ok: vOk, visits_outside: vFail });
+});
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {

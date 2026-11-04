@@ -50,7 +50,7 @@ async function loadAll() {
 function initLiveMap() {
   const c = S.data.posts[0] ? [S.data.posts[0].lat, S.data.posts[0].lng] : [13.7307, 100.5418];
   S.mapLive = L.map('map-admin').setView(c, 16);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(S.mapLive);
+  SGT.addTileLayer(S.mapLive);
   for (const p of S.data.posts) L.marker([p.lat, p.lng]).addTo(S.mapLive).bindPopup('🚔 ' + p.name);
   for (const cp of S.data.checkpoints) {
     L.circleMarker([cp.lat, cp.lng], { radius: 7, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: .9 })
@@ -117,7 +117,7 @@ async function showTrack(shiftId) {
 function initManageMap() {
   const c = S.data.posts[0] ? [S.data.posts[0].lat, S.data.posts[0].lng] : [13.7307, 100.5418];
   S.mapManage = L.map('map-manage').setView(c, 16);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(S.mapManage);
+  SGT.addTileLayer(S.mapManage);
   S.mapManage.on('click', (e) => {
     $('p-lat').value = e.latlng.lat.toFixed(6); $('p-lng').value = e.latlng.lng.toFixed(6);
     $('c-lat').value = e.latlng.lat.toFixed(6); $('c-lng').value = e.latlng.lng.toFixed(6);
@@ -264,7 +264,16 @@ async function addSchedule() {
     toast('เพิ่มตารางเวรแล้ว 🕐'); await loadAll();
   } catch (e) { toast(e.message); }
 }
-async function delSchedule(id) { if (!confirm('ลบตารางเวรนี้?')) return; await api(`/api/admin/schedubtn-ghost" onclick="delSchedule(${sc.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีตารางเวร</p>';
+async function delSchedule(id) { if (!confirm('ลบตารางเวรนี้?')) return; await api(`/api/admin/schedules/${id}`, null, 'DELETE'); await loadAll(); }
+function renderSchedules() {
+  const guards = S.data.users.filter(u => u.role === 'guard');
+  $('sc-guard').innerHTML = guards.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+  $('sc-post').innerHTML = S.data.posts.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  if (!$('sc-date').value) $('sc-date').value = new Date().toISOString().slice(0, 10);
+  $('schedule-list').innerHTML = S.data.schedules.map(sc =>
+    `<div class="cp-item"><div>🕐 <b>${sc.date}</b> ${sc.start_time}–${sc.end_time}<br>
+     <span class="muted">${sc.guard_name} @ ${sc.post_name}</span></div>
+     <button class="btn-sm btn-ghost" onclick="delSchedule(${sc.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีตารางเวร</p>';
 }
 
 // ---------- ตั้งค่าระบบ ----------
@@ -284,4 +293,36 @@ async function saveSettings() {
   document.querySelectorAll('#settings-list [data-key]').forEach(el => body[el.dataset.key] = el.value);
   try { const j = await api('/api/admin/settings', body, 'PUT'); toast(`บันทึกแล้ว 💾 (${j.updated} รายการ)`); await loadAll(); }
   catch (e) { toast(e.message); }
+}
+
+// ---------- สถิติ ----------
+async function loadStats() {
+  try {
+    const s = await api('/api/admin/stats');
+    const maxV = Math.max(1, ...s.last7days.map(d => d.visits));
+    $('stats-body').innerHTML = `
+      <div class="row" style="flex-wrap:wrap;">
+        ${[['👥 ผู้ใช้ทั้งหมด', s.totals.users], ['🚶 รปภ.', s.totals.guards], ['🚔 ป้อม', s.totals.posts],
+           ['📍 จุดตรวจ', s.totals.checkpoints], ['🕐 กะทั้งหมด', s.totals.shifts_total], ['📅 กะวันนี้', s.totals.shifts_today],
+           ['📋 รายงาน', s.totals.reports], ['🚨 SOS', s.totals.sos], ['📡 จุด GPS', s.totals.gps_points]]
+          .map(([l, v]) => `<div class="card" style="flex:1;min-width:100px;text-align:center;"><div class="big">${v}</div><span class="muted">${l}</span></div>`).join('')}
+      </div>
+      <div class="card"><h2>⏱️ ระยะเวลากะเฉลี่ย</h2><div class="big">${s.avg_shift_minutes ? s.avg_shift_minutes + ' นาที' : '—'}</div></div>
+      <div class="card"><h2>📈 7 วันย้อนหลัง (กะ / การเช็คจุด)</h2>
+        ${s.last7days.map(d => `<div class="row" style="margin-bottom:6px;"><span style="width:90px;">${d.date.slice(5)}</span>
+          <div style="flex:1;background:#0b1220;border-radius:8px;height:18px;"><div style="width:${Math.round(d.visits / maxV * 100)}%;background:var(--ok);height:100%;border-radius:8px;"></div></div>
+          <span class="muted" style="width:110px;text-align:right;">${d.shifts} กะ · ${d.visits} จุด</span></div>`).join('')}
+      </div>
+      <div class="card"><h2>📍 จุดตรวจที่ถูกเช็คบ่อย</h2>
+        ${s.checkpoint_stats.map(c => `<div class="cp-item"><div><b>${c.code}</b> ${c.name}</div><b>${c.visited} ครั้ง</b></div>`).join('') || '<p class="muted">ยังไม่มีข้อมูล</p>'}
+      </div>`;
+  } catch (e) { toast(e.message); }
+}
+
+// ---------- บันทึกการใช้งาน ----------
+function renderAudit() {
+  $('audit-list').innerHTML = (S.data.audit || []).map(a =>
+    `<div class="cp-item"><div><b>${a.action}</b> โดย ${a.actor}<br>
+     <span class="muted">${a.ts.replace('T', ' ').slice(0, 19)} · ${a.detail || ''}</span></div></div>`).join('')
+    || '<p class="muted">ยังไม่มีบันทึก</p>';
 }

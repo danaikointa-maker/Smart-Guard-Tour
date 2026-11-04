@@ -42,7 +42,7 @@ function renderLiveMap(shifts) {
   $('rmap').classList.remove('hidden');
   if (!S.map) {
     S.map = L.map('rmap').setView([13.7307, 100.5418], 16);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(S.map);
+    SGT.addTileLayer(S.map);
   }
   const live = shifts.filter(s => s.live);
   for (const s of live) {
