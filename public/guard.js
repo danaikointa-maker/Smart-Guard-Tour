@@ -7,7 +7,8 @@ const show = (id) => { document.querySelectorAll('.container > div').forEach(d =
 
 const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: null, post: null,
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
-  cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null };
+  cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null,
+  cfg: { gps_interval_sec: 4 } };
 
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': S.token },
@@ -24,6 +25,7 @@ async function doLogin() {
   try {
     const j = await api('/api/login', { name: $('lg-name').value.trim(), pin: $('lg-pin').value.trim() });
     S.token = j.token; S.me = j.user; localStorage.setItem('sgt_token', j.token);
+    fetch('/api/settings').then(r => r.json()).then(c => { S.cfg = { ...S.cfg, ...c }; }).catch(() => {});
     toast(`สวัสดี ${j.user.name} 👋`); goScanIn();
   } catch (e) { toast(e.message); }
 }
@@ -60,7 +62,8 @@ async function doCheckin(qr) {
     S.shift = j.shift; S.post = j.post; S.checkpoints = j.checkpoints;
     toast(`เช็คอินที่ ${j.post.name} สำเร็จ ✅`);
     $('start-post').textContent = j.post.name;
-    $('start-info').textContent = `มีจุดตรวจทั้งหมด ${j.checkpoints.length} จุด · กะ #${j.shift.id}`;
+    $('start-info').textContent = `มีจุดตรวจทั้งหมด ${j.checkpoints.length} จุด · กะ #${j.shift.id}` +
+      (j.schedule ? ` · เวรของคุณวันนี้ ${j.schedule.start_time}–${j.schedule.end_time} น.` : '');
     show('scr-start');
   } catch (e) { toast(e.message); goScanIn(); }
 }
@@ -88,7 +91,7 @@ function startGPS() {
     $('myacc').textContent = `±${Math.round(S.myPos.acc)} ม.`;
     updateMap(); renderCpList();
     const t = Date.now();
-    if (t - S.lastSent > 4000) { S.lastSent = t; sendPos(); }
+    if (t - S.lastSent > (Number(S.cfg.gps_interval_sec) || 4) * 1000) { S.lastSent = t; sendPos(); }
   }, (e) => toast('GPS: ' + e.message), { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
 }
 function sendPos() {

@@ -188,16 +188,93 @@ async function openReport(id) {
 }
 
 // ---------- แจ้งเตือน ----------
+function toggleNotifFields() {
+  const ch = $('n-channel').value;
+  $('n-url').classList.toggle('hidden', ch !== 'webhook');
+  $('n-token').classList.toggle('hidden', ch === 'webhook');
+  $('n-chat').classList.toggle('hidden', ch === 'webhook');
+}
 async function addNotif() {
   try {
-    await api('/api/admin/notif', { event_type: $('n-event').value, label: $('n-label').value.trim(), webhook_url: $('n-url').value.trim() });
+    await api('/api/admin/notif', {
+      event_type: $('n-event').value, label: $('n-label').value.trim(), channel: $('n-channel').value,
+      webhook_url: $('n-url').value.trim(), bot_token: $('n-token').value.trim(), chat_id: $('n-chat').value.trim(),
+    });
     toast('บันทึกกลุ่มแล้ว 🔔'); await loadAll();
   } catch (e) { toast(e.message); }
 }
 async function delNotif(id) { if (!confirm('ลบกลุ่มนี้?')) return; await api(`/api/admin/notif/${id}`, null, 'DELETE'); await loadAll(); }
+async function testNotif(id) {
+  toast('กำลังทดสอบส่ง…');
+  try { const j = await api(`/api/admin/notif/${id}/test`, {}); toast(j.ok ? '✅ ส่งสำเร็จ: ' + j.result : '⚠️ ' + j.result); }
+  catch (e) { toast(e.message); }
+}
+const CH_LABEL = { webhook: 'Webhook', telegram: 'Telegram', line: 'LINE' };
 function renderNotif() {
   $('notif-list').innerHTML = S.data.notif.map(n =>
-    `<div class="cp-item"><div><b>${n.label}</b> <span class="tag tag-info">${n.event_type}</span><br>
-     <span class="muted" style="word-break:break-all;">${n.webhook_url || '(ยังไม่ใส่ URL)'}</span></div>
-     <button class="btn-sm btn-ghost" onclick="delNotif(${n.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีกลุ่ม</p>';
+    `<div class="cp-item"><div><b>${n.label}</b> <span class="tag tag-info">${n.event_type}</span>
+     <span class="tag tag-ok">${CH_LABEL[n.channel] || n.channel}</span><br>
+     <span class="muted" style="word-break:break-all;">${n.channel === 'webhook' ? (n.webhook_url || '(ยังไม่ใส่ URL)')
+       : 'chat/group: ' + (n.chat_id || '-') + (n.bot_token ? ' · มี token ✓' : ' · ขาด token')}</span></div>
+     <div style="display:flex;gap:6px;"><button class="btn-sm btn-ghost" onclick="testNotif(${n.id})">🧪 ทดสอบ</button>
+     <button class="btn-sm btn-ghost" onclick="delNotif(${n.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มีกลุ่ม</p>';
+}
+
+// ---------- ผู้ใช้ ----------
+const ROLE_LABEL = { guard: '🚶 รปภ.', supervisor: '👮 หัวหน้า รปภ.', resident: '🏠 ลูกบ้าน', admin: '🛠️ Admin' };
+async function addUser() {
+  try {
+    await api('/api/admin/users', { name: $('u-name').value.trim(), pin: $('u-pin').value.trim(), role: $('u-role').value });
+    toast('เพิ่มผู้ใช้แล้ว 👥'); $('u-name').value = ''; $('u-pin').value = ''; await loadAll();
+  } catch (e) { toast(e.message); }
+}
+async function delUser(id) { if (!confirm('ลบผู้ใช้นี้?')) return; try { await api(`/api/admin/users/${id}`, null, 'DELETE'); await loadAll(); } catch (e) { toast(e.message); } }
+async function resetPin(id) {
+  const pin = prompt('ตั้ง PIN ใหม่:'); if (!pin) return;
+  try { await api(`/api/admin/users/${id}`, { pin }); toast('เปลี่ยน PIN แล้ว'); } catch (e) { toast(e.message); }
+}
+function renderUsers() {
+  $('user-list').innerHTML = S.data.users.map(u =>
+    `<div class="cp-item"><div><b>${u.name}</b> <span class="tag tag-info">${ROLE_LABEL[u.role] || u.role}</span></div>
+     <div style="display:flex;gap:6px;"><button class="btn-sm btn-ghost" onclick="resetPin(${u.id})">🔑 เปลี่ยน PIN</button>
+     <button class="btn-sm btn-ghost" onclick="delUser(${u.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ไม่มีผู้ใช้</p>';
+}
+
+// ---------- ตารางเวร ----------
+async function addSchedule() {
+  try {
+    await api('/api/admin/schedules', { guard_id: +$('sc-guard').value, post_id: +$('sc-post').value,
+      date: $('sc-date').value, start_time: $('sc-start').value, end_time: $('sc-end').value });
+    toast('เพิ่มตารางเวรแล้ว 🕐'); await loadAll();
+  } catch (e) { toast(e.message); }
+}
+async function delSchedule(id) { if (!confirm('ลบตารางเวรนี้?')) return; await api(`/api/admin/schedules/${id}`, null, 'DELETE'); await loadAll(); }
+function renderSchedules() {
+  const guards = S.data.users.filter(u => u.role === 'guard');
+  $('sc-guard').innerHTML = guards.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+  $('sc-post').innerHTML = S.data.posts.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
+  if (!$('sc-date').value) $('sc-date').value = new Date().toISOString().slice(0, 10);
+  $('schedule-list').innerHTML = S.data.schedules.map(sc =>
+    `<div class="cp-item"><div>🕐 <b>${sc.date}</b> ${sc.start_time}–${sc.end_time}<br>
+     <span class="muted">${sc.guard_name} @ ${sc.post_name}</span></div>
+     <button class="btn-sm btn-ghost" onclick="delSchedule(${sc.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีตารางเวร</p>';
+}
+
+// ---------- ตั้งค่าระบบ ----------
+function renderSettings() {
+  const boolKeys = ['resident_see_status', 'resident_see_live_location', 'resident_see_history'];
+  $('settings-list').innerHTML = S.data.settings.map(s => {
+    const isBool = boolKeys.includes(s.key);
+    const val = isBool
+      ? `<select data-key="${s.key}"><option value="true" ${s.value === 'true' ? 'selected' : ''}>เปิด (true)</option>
+          <option value="false" ${s.value === 'false' ? 'selected' : ''}>ปิด (false)</option></select>`
+      : `<input data-key="${s.key}" value="${s.value.replace(/"/g, '&quot;')}">`;
+    return `<div class="row" style="margin-bottom:10px;"><span style="flex:2;">${s.label}<br><span class="muted">${s.key}</span></span>${val}</div>`;
+  }).join('');
+}
+async function saveSettings() {
+  const body = {};
+  document.querySelectorAll('#settings-list [data-key]').forEach(el => body[el.dataset.key] = el.value);
+  try { const j = await api('/api/admin/settings', body, 'PUT'); toast(`บันทึกแล้ว 💾 (${j.updated} รายการ)`); await loadAll(); }
+  catch (e) { toast(e.message); }
 }

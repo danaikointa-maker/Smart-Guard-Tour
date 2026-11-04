@@ -69,19 +69,47 @@ CREATE TABLE IF NOT EXISTS notif_groups(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   event_type TEXT NOT NULL,
   label TEXT NOT NULL,
-  webhook_url TEXT NOT NULL DEFAULT ''
+  channel TEXT NOT NULL DEFAULT 'webhook', -- webhook | telegram | line
+  webhook_url TEXT NOT NULL DEFAULT '',
+  bot_token TEXT NOT NULL DEFAULT '',
+  chat_id TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS settings(
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '',
+  label TEXT NOT NULL DEFAULT '',
+  updated_at TEXT
+);
+CREATE TABLE IF NOT EXISTS shift_schedules(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  guard_id INTEGER NOT NULL,
+  post_id INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL
 );
 `);
 
-const now = () => new Date().toISOString();
+// ---- migration: เพิ่มคอลัมน์ใหม่ให้ตารางเก่า (ถ้ามี) ----
+function addCol(table, col, def) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch (e) { /* มีอยู่แล้ว */ }
+}
+addCol('notif_groups', 'channel', "TEXT NOT NULL DEFAULT 'webhook'");
+addCol('notif_groups', 'bot_token', "TEXT NOT NULL DEFAULT ''");
+addCol('notif_groups', 'chat_id', "TEXT NOT NULL DEFAULT ''");
 
-// ---- seed ข้อมูลเดโม่ (รันครั้งเดียว) ----
+const now = () => new Date().toISOString();
+const BASE = { lat: 13.7307, lng: 100.5418 }; // ลุมพินี (เดโม่)
+
+// ---- seed ข้อมูลเดโม่ (รันครั้งเดียวเมื่อ DB ว่าง) ----
 const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
 if (userCount === 0) {
   const insUser = db.prepare('INSERT INTO users(name,pin,role) VALUES(?,?,?)');
   insUser.run('admin', 'admin123', 'admin');
   insUser.run('สมชาย', '1234', 'guard');
   insUser.run('วันดี', '1234', 'guard');
+  insUser.run('วินัย', '1234', 'supervisor'); // หัวหน้า รปภ.
+  insUser.run('ลูกบ้าน A', '1234', 'resident');
 
   const insPost = db.prepare(
     'INSERT INTO posts(name,lat,lng,radius,qr,qr_png,created_at) VALUES(?,?,?,?,?,?,?)'
@@ -89,16 +117,59 @@ if (userCount === 0) {
   const insCp = db.prepare(
     'INSERT INTO checkpoints(code,name,lat,lng,radius,seq) VALUES(?,?,?,?,?,?)'
   );
-  // จุดเดโม่: ลุมพินี seta 13.7307,100.5418 (รปภ.เดินในรัศมีไม่กี่ร้อยเมตร)
   const { makePostQRSync } = require('./qr');
-  const base = { lat: 13.7307, lng: 100.5418 };
   const qr = makePostQRSync(1);
-  insPost.run('ป้อมประตู 1 ลุมพินี', base.lat, base.lng, 50, qr.payload, qr.png, now());
-  insCp.run('CP-01', 'ประตูทางเข้า', base.lat + 0.0009, base.lng, 100, 1);
-  insCp.run('CP-02', 'ทางเดินริมสระน้ำ', base.lat, base.lng + 0.0012, 100, 2);
-  insCp.run('CP-03', 'สระน้ำกลางสวน', base.lat - 0.0011, base.lng + 0.0006, 100, 3);
-  insCp.run('CP-04', 'ศาลาไทย', base.lat - 0.0004, base.lng - 0.0011, 100, 4);
-  console.log('[db] seeded demo data (admin/admin123, สมชาย/1234, วันดี/1234)');
+  insPost.run('ป้อมประตู 1 ลุมพินี', BASE.lat, BASE.lng, 50, qr.payload, qr.png, now());
+  insCp.run('CP-01', 'ประตูทางเข้า', BASE.lat + 0.0009, BASE.lng, 100, 1);
+  insCp.run('CP-02', 'ทางเดินริมสระน้ำ', BASE.lat, BASE.lng + 0.0012, 100, 2);
+  insCp.run('CP-03', 'สระน้ำกลางสวน', BASE.lat - 0.0011, BASE.lng + 0.0006, 100, 3);
+  insCp.run('CP-04', 'ศาลาไทย', BASE.lat - 0.0004, BASE.lng - 0.0011, 100, 4);
+
+  const today = new Date().toISOString().slice(0, 10);
+  const insSch = db.prepare('INSERT INTO shift_schedules(guard_id,post_id,date,start_time,end_time) VALUES(?,?,?,?,?)');
+  insSch.run(2, 1, today, '06:00', '14:00');
+  insSch.run(3, 1, today, '14:00', '22:00');
+  console.log('[db] seeded demo data (admin/admin123 · สมชาย/1234 · วันดี/1234 · วินัย/1234 หัวหน้า · ลูกบ้าน A/1234)');
+}
+
+// ---- seed บัญชีเดโม่เพิ่ม (idempotent) ----
+{
+  const insUser = db.prepare('INSERT OR IGNORE INTO users(name,pin,role) VALUES(?,?,?)');
+  insUser.run('วินัย', '1234', 'supervisor');
+  insUser.run('ลูกบ้าน A', '1234', 'resident');
+}
+
+// ---- seed ตารางเวรวันนี้ (idempotent) ----
+{
+  const today = new Date().toISOString().slice(0, 10);
+  const c = db.prepare('SELECT COUNT(*) c FROM shift_schedules WHERE date=?').get(today).c;
+  if (c === 0) {
+    const g = db.prepare("SELECT id FROM users WHERE name='สมชาย'").get();
+    const g2 = db.prepare("SELECT id FROM users WHERE name='วันดี'").get();
+    const p = db.prepare('SELECT id FROM posts ORDER BY id LIMIT 1').get();
+    if (g && p) db.prepare('INSERT INTO shift_schedules(guard_id,post_id,date,start_time,end_time) VALUES(?,?,?,?,?)').run(g.id, p.id, today, '06:00', '14:00');
+    if (g2 && p) db.prepare('INSERT INTO shift_schedules(guard_id,post_id,date,start_time,end_time) VALUES(?,?,?,?,?)').run(g2.id, p.id, today, '14:00', '22:00');
+  }
+}
+
+// ---- seed ค่าตั้งค่าเริ่มต้น (INSERT OR IGNORE — ไม่ทับค่าที่ admin แก้ไปแล้ว) ----
+{
+  const insSet = db.prepare('INSERT OR IGNORE INTO settings(key,value,label,updated_at) VALUES(?,?,?,?)');
+  const seed = [
+    ['gps_interval_sec', '4', 'ความถี่ส่ง GPS (วินาที)'],
+    ['gps_min_distance_m', '10', 'ส่ง GPS เมื่อขยับอย่างน้อย (เมตร)'],
+    ['default_post_radius_m', '30', 'รัศมีเริ่มต้นของป้อม/QR (เมตร)'],
+    ['default_checkpoint_radius_m', '100', 'รัศมีเริ่มต้นของจุดตรวจ (เมตร)'],
+    ['photo_jpeg_quality', '0.8', 'คุณภาพรูป JPEG (0-1)'],
+    ['resident_see_status', 'true', 'ลูกบ้านเห็นสถานะการตรวจ (true/false)'],
+    ['resident_see_live_location', 'false', 'ลูกบ้านเห็นตำแหน่งสด รปภ. (ค่าเริ่มต้นต้องเป็น false)'],
+    ['resident_see_history', 'false', 'ลูกบ้านเห็นเส้นทางย้อนหลัง (true/false)'],
+    ['map_lat', String(BASE.lat), 'แผนที่: ละติจูดเริ่มต้น'],
+    ['map_lng', String(BASE.lng), 'แผนที่: ลองจิจูดเริ่มต้น'],
+    ['map_zoom', '16', 'แผนที่: ซูมเริ่มต้น'],
+    ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
+  ];
+  for (const s of seed) insSet.run(...s, now());
 }
 
 module.exports = { db, now, UPLOAD_DIR };

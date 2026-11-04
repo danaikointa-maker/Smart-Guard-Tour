@@ -36,13 +36,24 @@ app.post('/api/login', (req, res) => {
   res.json({ token, user: { id: row.id, name: row.name, role: row.role } });
 });
 
+// ---------- ค่าตั้งค่า (สาธารณะ — ไม่มีความลับ) ----------
+app.get('/api/settings', (req, res) => {
+  const rows = db.prepare('SELECT key,value,label FROM settings').all();
+  res.json(Object.fromEntries(rows.map(r => [r.key, r.value])));
+});
+
 // ---------- admin: ภาพรวม ----------
 app.get('/api/admin/overview', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
   res.json({
     posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,created_at FROM posts ORDER BY id').all(),
     checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),
-    guards: db.prepare("SELECT id,name FROM users WHERE role='guard'").all(),
+    users: db.prepare('SELECT id,name,role FROM users ORDER BY id').all(),
+    schedules: db.prepare(
+      `SELECT sc.*, u.name guard_name, p.name post_name FROM shift_schedules sc
+       JOIN users u ON u.id=sc.guard_id JOIN posts p ON p.id=sc.post_id ORDER BY sc.date DESC, sc.start_time`
+    ).all(),
+    settings: db.prepare('SELECT key,value,label,updated_at FROM settings ORDER BY key').all(),
     shifts: db.prepare(
       `SELECT s.*, u.name guard_name, p.name post_name FROM shifts s
        JOIN users u ON u.id=s.guard_id JOIN posts p ON p.id=s.post_id
@@ -53,13 +64,74 @@ app.get('/api/admin/overview', auth, (req, res) => {
   });
 });
 
+// ---------- admin: ตั้งค่าระบบ ----------
+app.put('/api/admin/settings', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const entries = Object.entries(req.body || {});
+  const upd = db.prepare('UPDATE settings SET value=?, updated_at=? WHERE key=?');
+  let n = 0;
+  for (const [k, v] of entries) {
+    const r = upd.run(String(v), now(), k);
+    if (r.changes > 0) n++;
+  }
+  res.json({ ok: true, updated: n });
+});
+
+// ---------- admin: จัดการผู้ใช้ ----------
+app.post('/api/admin/users', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, pin, role } = req.body || {};
+  if (!name || !pin || !['guard', 'supervisor', 'resident', 'admin'].includes(role))
+    return res.status(400).json({ error: 'กรอกชื่อ PIN และเลือกบทบาท (guard/supervisor/resident/admin)' });
+  try {
+    const info = db.prepare('INSERT INTO users(name,pin,role) VALUES(?,?,?)').run(name.trim(), String(pin), role);
+    res.json({ id: info.lastInsertRowid });
+  } catch (e) { res.status(409).json({ error: 'ชื่อนี้มีอยู่แล้ว' }); }
+});
+
+app.put('/api/admin/users/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, pin, role } = req.body || {};
+  const u = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!u) return res.status(404).json({ error: 'ไม่พบผู้ใช้' });
+  if (role && !['guard', 'supervisor', 'resident', 'admin'].includes(role)) return res.status(400).json({ error: 'บทบาทไม่ถูกต้อง' });
+  db.prepare('UPDATE users SET name=COALESCE(?,name), pin=COALESCE(?,pin), role=COALESCE(?,role) WHERE id=?')
+    .run(name ? name.trim() : null, pin ? String(pin) : null, role || null, u.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/users/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  if (Number(req.params.id) === req.user.userId) return res.status(400).json({ error: 'ลบบัญชีตัวเองไม่ได้' });
+  db.prepare('DELETE FROM users WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ---------- admin: ตารางเวร ----------
+app.post('/api/admin/schedules', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { guard_id, post_id, date, start_time, end_time } = req.body || {};
+  if (!guard_id || !post_id || !date || !start_time || !end_time)
+    return res.status(400).json({ error: 'กรอกข้อมูลให้ครบ (รปภ./ป้อม/วันที่/เวลาเริ่ม-จบ)' });
+  const info = db.prepare('INSERT INTO shift_schedules(guard_id,post_id,date,start_time,end_time) VALUES(?,?,?,?,?)')
+    .run(guard_id, post_id, date, start_time, end_time);
+  res.json({ id: info.lastInsertRowid });
+});
+
+app.delete('/api/admin/schedules/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  db.prepare('DELETE FROM shift_schedules WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ---------- admin: สร้างป้อม + QR ----------
 app.post('/api/admin/posts', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
   const { name, lat, lng, radius } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
+  const defR = db.prepare("SELECT value FROM settings WHERE key='default_post_radius_m'").get();
   const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,created_at) VALUES(?,?,?,?,?,?,?)');
-  const info = ins.run(name, lat, lng, Number(radius) || 30, 'temp', 'temp', now());
+  const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', now());
   const qr = await makePostQRWithPng(info.lastInsertRowid, name);
   db.prepare('UPDATE posts SET qr=?, qr_png=? WHERE id=?').run(qr.payload, qr.png, info.lastInsertRowid);
   res.json({ id: info.lastInsertRowid, qr: qr.payload, qr_png: qr.png });
@@ -76,10 +148,11 @@ app.post('/api/admin/checkpoints', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
   const { name, lat, lng, radius, seq } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
+  const defR = db.prepare("SELECT value FROM settings WHERE key='default_checkpoint_radius_m'").get();
   const count = db.prepare('SELECT COUNT(*) c FROM checkpoints').get().c;
   const code = `CP-${String(count + 1).padStart(2, '0')}`;
   const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq) VALUES(?,?,?,?,?,?)');
-  const info = ins.run(code, name, lat, lng, Number(radius) || 100, Number(seq) || count + 1);
+  const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1);
   res.json({ id: info.lastInsertRowid, code });
 });
 
@@ -92,11 +165,53 @@ app.delete('/api/admin/checkpoints/:id', auth, (req, res) => {
 // ---------- admin: ตั้งค่ากลุ่มแจ้งเตือน ----------
 app.post('/api/admin/notif', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
-  const { event_type, label, webhook_url } = req.body || {};
+  const { event_type, label, channel, webhook_url, bot_token, chat_id } = req.body || {};
   if (!event_type || !label) return res.status(400).json({ error: 'กรอกประเภทเหตุการณ์และชื่อกลุ่ม' });
-  const info = db.prepare('INSERT INTO notif_groups(event_type,label,webhook_url) VALUES(?,?,?)')
-    .run(event_type, label, webhook_url || '');
+  if (!['webhook', 'telegram', 'line'].includes(channel || 'webhook'))
+    return res.status(400).json({ error: 'ช่องทางต้องเป็น webhook/telegram/line' });
+  const info = db.prepare(
+    'INSERT INTO notif_groups(event_type,label,channel,webhook_url,bot_token,chat_id) VALUES(?,?,?,?,?,?)'
+  ).run(event_type, label, channel || 'webhook', webhook_url || '', bot_token || '', chat_id || '');
   res.json({ id: info.lastInsertRowid });
+});
+
+// ส่งข้อความตามช่องทางที่ตั้งค่า — คืน 'ok' หรือ 'error:...'
+async function sendToGroup(g, text, extra) {
+  try {
+    if (g.channel === 'telegram') {
+      if (!g.bot_token || !g.chat_id) return 'error:ต้องใส่ bot_token+chat_id';
+      const r = await fetch(`https://api.telegram.org/bot${g.bot_token}/sendMessage`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: g.chat_id, text }),
+      });
+      return r.ok ? 'ok' : 'http' + r.status;
+    }
+    if (g.channel === 'line') {
+      if (!g.bot_token || !g.chat_id) return 'error:ต้องใส่ access_token+chat_id';
+      const r = await fetch('https://api.line.me/v2/bot/message/push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + g.bot_token },
+        body: JSON.stringify({ to: g.chat_id, messages: [{ type: 'text', text }] }),
+      });
+      return r.ok ? 'ok' : 'http' + r.status;
+    }
+    // webhook generic
+    if (!g.webhook_url) return 'error:ยังไม่ใส่ URL';
+    const r = await fetch(g.webhook_url, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group: g.label, text, ...extra }),
+    });
+    return r.ok ? 'ok' : 'http' + r.status;
+  } catch (e) { return 'error:' + e.message.slice(0, 40); }
+}
+
+// ทดสอบส่งข้อความเข้ากลุ่ม
+app.post('/api/admin/notif/:id/test', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const g = db.prepare('SELECT * FROM notif_groups WHERE id=?').get(req.params.id);
+  if (!g) return res.status(404).json({ error: 'ไม่พบกลุ่ม' });
+  const result = await sendToGroup(g, `🔔 ทดสอบการแจ้งเตือนจาก Smart Guard Tour — กลุ่ม "${g.label}" (${g.event_type})`, {});
+  res.json({ ok: result === 'ok', result });
 });
 
 app.delete('/api/admin/notif/:id', auth, (req, res) => {
@@ -136,8 +251,12 @@ app.post('/api/guard/checkin', auth, (req, res) => {
     shift = db.prepare('SELECT * FROM shifts WHERE id=?').get(info.lastInsertRowid);
   }
   const checkpoints = db.prepare('SELECT * FROM checkpoints ORDER BY seq').all();
+  const today = new Date().toISOString().slice(0, 10);
+  const schedule = db.prepare(
+    'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
+  ).get(req.user.userId, today);
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
-  res.json({ shift, post, checkpoints });
+  res.json({ shift, post, checkpoints, schedule });
 });
 
 // ---------- guard: กดเริ่มปฏิบัติงาน ----------
@@ -237,22 +356,13 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
     JSON.stringify(detail), '', now());
   const reportId = info.lastInsertRowid;
 
-  // ส่งรายงานไปยังกลุ่มที่ตั้งค่าไว้ (webhook — ใช้เป็น LINE/Telegram ได้)
+  // ส่งรายงานไปยังกลุ่มที่ตั้งค่าไว้ (webhook / Telegram / LINE)
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='shift_report'").all();
   const text = `📋 รายงานจบกะ #${reportId}\nรปภ.: ${req.user.name}\nป้อม: ${post.name}\nเช็คจุดตรวจสำเร็จ ${visits.length}/${total} จุด\nเริ่ม ${s.started_at || s.checked_in_at} — จบ ${now()}`;
   const sent = [];
   for (const g of groups) {
-    if (!g.webhook_url) continue;
-    try {
-      const r = await fetch(g.webhook_url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ group: g.label, text, reportId, detail }),
-      });
-      sent.push(`${g.label}:${r.ok ? 'ok' : 'http' + r.status}`);
-    } catch (e) {
-      sent.push(`${g.label}:error`);
-    }
+    const result = await sendToGroup(g, text, { reportId, detail });
+    sent.push(`${g.label}(${g.channel}):${result}`);
   }
   db.prepare('UPDATE reports SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', reportId);
 
