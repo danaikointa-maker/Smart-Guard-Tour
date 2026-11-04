@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — Smart Guard Tour</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<div class="container-wide">
+
+  <div id="scr-login">
+    <div class="card" style="max-width:420px; margin:60px auto;">
+      <h1>🖥️ ระบบหลังบ้าน</h1>
+      <input id="lg-name" placeholder="ชื่อ" style="margin-bottom:10px;">
+      <input id="lg-pin" type="password" placeholder="รหัสผ่าน" style="margin-bottom:12px;">
+      <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <button id="btn-sso" class="btn-ghost hidden" style="width:100%;margin-top:10px;"></button>
+      <p class="muted">เดโม่: admin / admin123</p>
+    </div>
+  </div>
+
+  <div id="scr-main" class="hidden">
+    <h1>🛡️ Smart Guard Tour — Admin</h1>
+    <div class="tabs">
+      <button class="active" data-tab="live" onclick="switchTab('live',this)">🗺️ แผนที่สด</button>
+      <button data-tab="manage" onclick="switchTab('manage',this)">➕ ป้อม & จุดตรวจ</button>
+      <button data-tab="qr" onclick="switchTab('qr',this)">🎫 QR ป้อม</button>
+      <button data-tab="reports" onclick="switchTab('reports',this)">📋 กะ & รายงาน</button>
+      <button data-tab="users" onclick="switchTab('users',this)">👥 ผู้ใช้</button>
+      <button data-tab="schedules" onclick="switchTab('schedules',this)">🕐 ตารางเวร</button>
+      <button data-tab="notif" onclick="switchTab('notif',this)">🔔 กลุ่มแจ้งเตือน</button>
+      <button data-tab="settings" onclick="switchTab('settings',this)">⚙️ ตั้งค่า</button>
+      <button data-tab="stats" onclick="switchTab('stats',this)">📊 สถิติ</button>
+      <button data-tab="audit" onclick="switchTab('audit',this)">📜 บันทึก</button>
+    </div>
+
+    <div id="tab-live">
+      <div class="card"><b>🟢 ตำแหน่ง รปภ. แบบเรียลไทม์</b> <span class="muted">(อัปเดตจาก WebSocket — คลิกกะเพื่อดูเส้นทาง)</span></div>
+      <div id="map-admin"></div>
+      <div id="live-list"></div>
+    </div>
+
+    <div id="tab-manage" class="hidden">
+      <div class="row">
+        <div class="card">
+          <h2>➕ เพิ่มป้อม (คลิกบนแผนที่เพื่อเลือกพิกัด)</h2>
+          <input id="p-name" placeholder="ชื่อป้อม" style="margin-bottom:8px;">
+          <div class="row"><input id="p-lat" placeholder="lat" readonly><input id="p-lng" placeholder="lng" readonly>
+          <input id="p-radius" placeholder="รัศมี QR (ม.)" value="30" style="max-width:110px;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="addPost()">สร้างป้อม + QR</button>
+        </div>
+        <div class="card">
+          <h2>➕ เพิ่มจุดตรวจ</h2>
+          <input id="c-name" placeholder="ชื่อจุดตรวจ" style="margin-bottom:8px;">
+          <div class="row"><input id="c-lat" placeholder="lat" readonly><input id="c-lng" placeholder="lng" readonly>
+          <input id="c-radius" placeholder="รัศมี (ม.)" value="100" style="max-width:110px;"></div>
+          <button class="btn-primary" style="margin-top:8px;" onclick="addCheckpoint()">เพิ่มจุดตรวจ</button>
+        </div>
+      </div>
+      <div id="map-manage" style="height:380px;border-radius:14px;margin-bottom:14px;"></div>
+      <div class="row">
+        <div class="card"><h2>🚔 ป้อม</h2><div id="post-list"></div></div>
+        <div class="card"><h2>📍 จุดตรวจ</h2><div id="cp-list-admin"></div></div>
+      </div>
+    </div>
+
+    <div id="tab-qr" class="hidden">
+      <div class="card"><b>🎫 QR Code ของป้อม</b> <span class="muted">— ปริ้นติดที่ป้อมให้ รปภ. สแกน</span></div>
+      <div id="qr-list"></div>
+    </div>
+
+    <div id="tab-reports" class="hidden">
+      <div class="row">
+        <div class="card"><h2>🕐 กะล่าสุด</h2><div id="shift-list"></div></div>
+        <div class="card" style="flex:2;"><h2>📋 รายงานที่ส่งเข้ามา</h2><div id="report-list"></div></div>
+      </div>
+    </div>
+
+    <div id="tab-notif" class="hidden">
+      <div class="card">
+        <h2>🔔 ตั้งค่ากลุ่มแจ้งเตือน</h2>
+        <p class="muted">เลือกช่องทาง: <b>Telegram</b> = ใส่ Bot Token + Chat ID · <b>LINE</b> = ใส่ Channel Access Token + Chat/Group ID · <b>Webhook</b> = ใส่ URL ใดก็ได้ — ส่งเมื่อ <code>event_type</code> ตรงกัน</p>
+        <div class="row">
+          <select id="n-event"><option value="shift_report">shift_report (รายงานจบกะ)</option><option value="sos">sos (ปุ่มฉุกเฉิน)</option><option value="missed_checkpoint">missed_checkpoint (จุดที่ขาด)</option></select>
+          <input id="n-label" placeholder="ชื่อกลุ่ม เช่น กลุ่มเวรกลางคืน">
+          <select id="n-channel" onchange="toggleNotifFields()">
+            <option value="webhook">Webhook URL</option>
+            <option value="telegram">Telegram Bot</option>
+            <option value="line">LINE Messaging API</option>
+          </select>
+        </div>
+        <div class="row" style="margin-top:8px;">
+          <input id="n-url" placeholder="Webhook URL">
+          <input id="n-token" placeholder="Bot Token / Access Token" class="hidden">
+          <input id="n-chat" placeholder="Chat ID / Group ID" class="hidden">
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addNotif()">บันทึกกลุ่ม</button>
+      </div>
+      <div class="card"><h2>กลุ่มที่ตั้งไว้</h2><div id="notif-list"></div></div>
+    </div>
+
+    <div id="tab-users" class="hidden">
+      <div class="card">
+        <h2>👥 เพิ่มผู้ใช้</h2>
+        <div class="row">
+          <input id="u-name" placeholder="ชื่อ">
+          <input id="u-pin" placeholder="PIN" inputmode="numeric">
+          <select id="u-role">
+            <option value="guard">รปภ. (guard)</option>
+            <option value="supervisor">หัวหน้า รปภ. (supervisor)</option>
+            <option value="resident">ลูกบ้าน (resident)</option>
+            <option value="admin">ผู้ดูแล (admin)</option>
+          </select>
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addUser()">เพิ่มผู้ใช้</button>
+      </div>
+      <div class="card"><h2>ผู้ใช้ทั้งหมด</h2><div id="user-list"></div></div>
+    </div>
+
+    <div id="tab-schedules" class="hidden">
+      <div class="card">
+        <h2>🕐 จัดตารางเวร</h2>
+        <div class="row">
+          <select id="sc-guard"></select>
+          <select id="sc-post"></select>
+          <input id="sc-date" type="date">
+          <input id="sc-start" type="time" value="06:00" style="max-width:110px;">
+          <input id="sc-end" type="time" value="14:00" style="max-width:110px;">
+        </div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addSchedule()">เพิ่มตารางเวร</button>
+      </div>
+      <div class="card"><h2>ตารางเวรที่ตั้งไว้</h2><div id="schedule-list"></div></div>
+    </div>
+
+    <div id="tab-settings" class="hidden">
+      <div class="card">
+        <h2>⚙️ ตั้งค่าระบบ</h2>
+        <p class="muted">แก้ไขแล้วกดบันทึก — ค่าบางอย่างมีผลกับแอป รปภ. ทันที</p>
+        <div id="settings-list"></div>
+        <button class="btn-primary" style="margin-top:10px;" onclick="saveSettings()">💾 บันทึกการตั้งค่า</button>
+      </div>
+    </div>
+
+    <div id="tab-stats" class="hidden">
+      <div id="stats-body"></div>
+    </div>
+
+    <div id="tab-audit" class="hidden">
+      <div class="card"><h2>📜 บันทึกการใช้งาน (audit log) — 100 รายการล่าสุด</h2><div id="audit-list"></div></div>
+    </div>
+  </div>
+</div>
+
+<div id="modal-report" class="modal hidden">
+  <div class="box" style="max-width:640px; max-height:85vh; overflow:auto;">
+    <h2 id="mr-title">รายงาน</h2>
+    <div id="mr-body"></div>
+    <button class="btn-ghost" style="margin-top:12px; width:100%;" onclick="$('modal-report').classList.add('hidden')">ปิด</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/maps.js"></script>
+<script src="/admin.js"></script>
+<script src="/sso.js"></script>
+<script>ssoMaybeShow("btn-sso", "lg-name", (j) => if(j.user.role!=='admin'&&j.user.role!=='supervisor'){alert('ต้องเป็น admin/หัวหน้า');return;}S.token=j.token;S.role=j.user.role;localStorage.setItem('sgt_admin_token',j.token);location.reload());</script>
+</body>
+</html>
