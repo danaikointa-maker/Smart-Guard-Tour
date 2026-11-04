@@ -19,9 +19,17 @@ async function doLogin() {
       body: JSON.stringify({ name: $('lg-name').value.trim(), pin: $('lg-pin').value.trim() }) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error);
-    if (j.user.role !== 'admin') throw new Error('ต้องเป็นบัญชี admin');
-    S.token = j.token; localStorage.setItem('sgt_admin_token', j.token);
+    if (j.user.role !== 'admin' && j.user.role !== 'supervisor') throw new Error('ต้องเป็นบัญชี admin หรือหัวหน้า รปภ.');
+    S.token = j.token; S.role = j.user.role; localStorage.setItem('sgt_admin_token', j.token);
     $('scr-login').classList.add('hidden'); $('scr-main').classList.remove('hidden');
+    if (S.role === 'supervisor') {
+      // หัวหน้า รปภ.: เห็นเฉพาะแผนที่สด + รายงาน (อ่านอย่างเดียว ไม่ตั้งค่าได้)
+      document.querySelectorAll('.tabs button').forEach(b => {
+        const t = b.dataset.tab;
+        if (!['live', 'reports'].includes(t)) b.classList.add('hidden');
+      });
+      $('tab-live').querySelector('.card b').textContent = '🟢 ตำแหน่ง รปภ. แบบเรียลไทม์ (มุมมองหัวหน้า)';
+    }
     await loadAll(); initLiveMap(); connectWS();
   } catch (e) { toast(e.message); }
 }
@@ -56,6 +64,14 @@ function connectWS() {
   S.ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
     if (m.type === 'gps') onGps(m);
+    else if (m.type === 'sos') {
+      toast(`🚨 SOS จาก ${m.guard}! ${m.lat}, ${m.lng}`);
+      if (S.mapLive && m.lat) {
+        L.circleMarker([m.lat, m.lng], { radius: 16, color: '#ef4444', fillColor: '#ef4444', fillOpacity: .8 })
+          .addTo(S.mapLive).bindPopup(`🚨 SOS ${m.guard}<br>${new Date(m.ts).toLocaleTimeString('th-TH')}`).openPopup();
+      }
+    }
+    else if (m.type === 'missed_cp') toast(`⚠️ กะ #${m.shiftId}: ${m.guard} ยังไม่เช็ค ${m.cp}`);
     else if (m.type === 'visit') toast(`📍 ${m.guard} เช็ค ${m.checkpoint} ${m.inside ? 'สำเร็จ' : '⚠️ นอกรัศมี'}`);
     else if (m.type === 'report') { toast(`📨 รายงานใหม่ #${m.reportId} จาก ${m.guard}`); loadAll(); }
     else if (m.type === 'shift') { loadAll(); }
@@ -248,16 +264,7 @@ async function addSchedule() {
     toast('เพิ่มตารางเวรแล้ว 🕐'); await loadAll();
   } catch (e) { toast(e.message); }
 }
-async function delSchedule(id) { if (!confirm('ลบตารางเวรนี้?')) return; await api(`/api/admin/schedules/${id}`, null, 'DELETE'); await loadAll(); }
-function renderSchedules() {
-  const guards = S.data.users.filter(u => u.role === 'guard');
-  $('sc-guard').innerHTML = guards.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
-  $('sc-post').innerHTML = S.data.posts.map(p => `<option value="${p.id}">${p.name}</option>`).join('');
-  if (!$('sc-date').value) $('sc-date').value = new Date().toISOString().slice(0, 10);
-  $('schedule-list').innerHTML = S.data.schedules.map(sc =>
-    `<div class="cp-item"><div>🕐 <b>${sc.date}</b> ${sc.start_time}–${sc.end_time}<br>
-     <span class="muted">${sc.guard_name} @ ${sc.post_name}</span></div>
-     <button class="btn-sm btn-ghost" onclick="delSchedule(${sc.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีตารางเวร</p>';
+async function delSchedule(id) { if (!confirm('ลบตารางเวรนี้?')) return; await api(`/api/admin/schedubtn-ghost" onclick="delSchedule(${sc.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีตารางเวร</p>';
 }
 
 // ---------- ตั้งค่าระบบ ----------

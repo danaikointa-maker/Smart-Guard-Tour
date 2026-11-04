@@ -189,6 +189,15 @@ async function sendVisit() {
   }
 }
 
+// ---------- SOS ----------
+async function sos() {
+  if (!confirm('🚨 ส่งสัญญาณฉุกเฉิน SOS ไปยังหัวหน้าและกลุ่มแจ้งเตือน now?')) return;
+  try {
+    const j = await api('/api/guard/sos', { shiftId: S.shift.id, lat: S.myPos?.lat, lng: S.myPos?.lng });
+    toast('🚨 ส่ง SOS แล้ว! ' + (j.sent_to.length ? 'ส่งถึง: ' + j.sent_to.join(', ') : 'แจ้งในแผนที่สดของหัวหน้าแล้ว'));
+  } catch (e) { toast(e.message); }
+}
+
 // ---------- เช็คเอาต์ ----------
 function goScanOut() { show('scr-scanout'); $('scanout-status').textContent = 'กำลังมองหา QR…'; openCam('cam-out', (qr) => doCheckout(qr)); }
 async function manualCheckout() { const v = $('qr-manual-out').value.trim(); if (v) doCheckout(v); }

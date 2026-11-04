@@ -25,6 +25,7 @@ function auth(req, res, next) {
   req.user = u;
   next();
 }
+const canView = (u) => u.role === 'admin' || u.role === 'supervisor'; // หัวหน้า รปภ. อ่านได้
 
 // ---------- auth ----------
 app.post('/api/login', (req, res) => {
@@ -44,7 +45,7 @@ app.get('/api/settings', (req, res) => {
 
 // ---------- admin: ภาพรวม ----------
 app.get('/api/admin/overview', auth, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  if (!canView(req.user)) return res.status(403).json({ error: 'ต้องเป็น admin' });
   res.json({
     posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,created_at FROM posts ORDER BY id').all(),
     checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),
@@ -221,6 +222,7 @@ app.delete('/api/admin/notif/:id', auth, (req, res) => {
 });
 
 app.get('/api/admin/reports/:id', auth, (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
   const r = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
   if (!r) return res.status(404).json({ error: 'ไม่พบรายงาน' });
   const visits = db.prepare(
@@ -372,7 +374,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
 
 // ---------- admin: เส้นทางย้อนหลังของกะ ----------
 app.get('/api/admin/shift/:id/track', auth, (req, res) => {
-  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  if (!canView(req.user)) return res.status(403).json({ error: 'ต้องเป็น admin' });
   const track = db.prepare('SELECT lat,lng,accuracy,ts FROM gps_tracks WHERE shift_id=? ORDER BY id').all(req.params.id);
   const s = db.prepare(
     `SELECT s.*, u.name guard_name, p.name post_name FROM shifts s
@@ -392,6 +394,84 @@ app.get('/api/guard/shift/:id', auth, (req, res) => {
   const track = db.prepare('SELECT lat,lng,accuracy,ts FROM gps_tracks WHERE shift_id=? ORDER BY id').all(s.id);
   res.json({ shift: s, visits, track });
 });
+
+
+// ---------- ลูกบ้าน (resident): ดูสถานะตามสิทธิ์ ----------
+app.get('/api/resident/status', auth, (req, res) => {
+  if (req.user.role !== 'resident' && req.user.role !== 'admin' && req.user.role !== 'supervisor')
+    return res.status(403).json({ error: 'เฉพาะลูกบ้านเท่านั้น' });
+  const get = (k, d) => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : d; };
+  const seeStatus = get('resident_see_status', 'true') === 'true';
+  const seeLive = get('resident_see_live_location', 'false') === 'true';
+  const seeHistory = get('resident_see_history', 'false') === 'true';
+  if (!seeStatus) return res.json({ see_status: false, shifts: [] });
+
+  // สรุปกะล่าสุด (ไม่มีพิกัดสดถ้าไม่ได้รับสิทธิ์)
+  const shifts = db.prepare(
+    `SELECT s.id, s.status, s.checked_in_at, s.started_at, s.checked_out_at,
+            u.name guard_name, p.name post_name
+     FROM shifts s JOIN users u ON u.id=s.guard_id JOIN posts p ON p.id=s.post_id
+     ORDER BY s.id DESC LIMIT 10`
+  ).all().map(s => {
+    const total = db.prepare('SELECT COUNT(*) c FROM checkpoints').get().c;
+    const visited = db.prepare('SELECT COUNT(*) c FROM visits WHERE shift_id=? AND inside=1').get(s.id).c;
+    const last = db.prepare('SELECT ts FROM gps_tracks WHERE shift_id=? ORDER BY id DESC LIMIT 1').get(s.id);
+    const out = { ...s, checkpoints_total: total, checkpoints_visited: visited, last_update: last ? last.ts : null };
+    if (seeLive && s.status === 'patrolling') {
+      const g = db.prepare('SELECT lat,lng,accuracy,ts FROM gps_tracks WHERE shift_id=? ORDER BY id DESC LIMIT 1').get(s.id);
+      if (g) out.live = g;
+    }
+    if (seeHistory) {
+      out.track = db.prepare('SELECT lat,lng,ts FROM gps_tracks WHERE shift_id=? ORDER BY id').all(s.id);
+    }
+    return out;
+  });
+  res.json({ see_status: true, see_live_location: seeLive, see_history: seeHistory, shifts });
+});
+
+// ---------- รปภ.: ปุ่ม SOS ฉุกเฉิน ----------
+app.post('/api/guard/sos', auth, async (req, res) => {
+  const { shiftId, lat, lng } = req.body || {};
+  const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
+  if (!s) return res.status(404).json({ error: 'ไม่พบกะนี้' });
+  const mapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
+  const text = `🚨 SOS! รปภ. ${req.user.name} แจ้งฉุกเฉิน
+กะ #${s.id} · ${lat}, ${lng}
+แผนที่: ${mapsLink}
+เวลา ${now()}`;
+  broadcast({ type: 'sos', guard: req.user.name, shiftId: s.id, lat, lng, ts: now() });
+  const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='sos'").all();
+  const sent = [];
+  for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { sos: true, shiftId: s.id, lat, lng }));
+  res.json({ ok: true, sent_to: sent });
+});
+
+// ---------- แจ้งเตือน "จุดตรวจที่ยังไม่ถึง" (เช็คทุก 60 วินาที) ----------
+const alertedMissed = new Set();
+setInterval(() => {
+  try {
+    const active = db.prepare("SELECT * FROM shifts WHERE status='patrolling'").all();
+    for (const s of active) {
+      const cps = db.prepare('SELECT * FROM checkpoints').all();
+      for (const cp of cps) {
+        const key = s.id + ':' + cp.id;
+        if (alertedMissed.has(key)) continue;
+        const done = db.prepare('SELECT COUNT(*) c FROM visits WHERE shift_id=? AND checkpoint_id=? AND inside=1').get(s.id, cp.id).c;
+        if (done) continue;
+        // แจ้งเมื่อกะเริ่มมาแล้ว 30 นาทีแล้วยังไม่เช็คจุดนี้
+        const started = new Date(s.started_at || s.checked_in_at).getTime();
+        if (Date.now() - started > 30 * 60 * 1000) {
+          alertedMissed.add(key);
+          const u = db.prepare('SELECT name FROM users WHERE id=?').get(s.guard_id);
+          const text = `⚠️ จุดตรวจ ${cp.code} (${cp.name}) ยังไม่ถูกเช็ค — รปภ. ${u.name} กะ #${s.id} เริ่มมาแล้ว 30+ นาที`;
+          broadcast({ type: 'missed_cp', shiftId: s.id, cp: cp.code, guard: u.name });
+          db.prepare("SELECT * FROM notif_groups WHERE event_type='missed_checkpoint'").all()
+            .forEach(g => sendToGroup(g, text, { shiftId: s.id, checkpoint: cp.code }));
+        }
+      }
+    }
+  } catch (e) { console.error('[alert]', e.message); }
+}, 60 * 1000);
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {

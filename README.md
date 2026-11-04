@@ -13,7 +13,7 @@
   - ⚙️ ตั้งค่าระบบ: ความถี่ GPS, รัศมีเริ่มต้นป้อม/จุดตรวจ, คุณภาพรูป, **สิทธิ์ลูกบ้าน** (เห็นสถานะตรวจได้ / เห็นตำแหน่งสด = ปิดเริ่มต้น / เห็นย้อนหลัง), จุดกึ่งกลางแผนที่
 - **บริการกลาง** — REST API + WebSocket + ฐานข้อมูล SQLite แยกของระบบนี้เอง (PostgreSQL+PostGIS ในโปรดักชัน)
 
-เอกสารออกแบบฉบับเต็ม: [`docs/smart-guard-tour-design.md`](docs/smart-guard-tour-design.md)
+เอกสาร: [ออกแบบระบบ](docs/smart-guard-tour-design.md) · [สถาปัตยกรรม เอกสารออกแบบฉบับเต็ม: [`docs/smart-guard-tour-design.md`](docs/smart-guard-tour-design.md) โครงสร้างพัฒนาต่อ](docs/architecture.md)
 
 ## วิธีรัน
 ```bash
