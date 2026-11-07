@@ -80,6 +80,17 @@ CREATE TABLE IF NOT EXISTS settings(
   label TEXT NOT NULL DEFAULT '',
   updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS incidents(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shift_id INTEGER,
+  guard_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  description TEXT,
+  lat REAL, lng REAL, accuracy REAL,
+  photo TEXT,
+  sent_to TEXT,
+  ts TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_logs(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,

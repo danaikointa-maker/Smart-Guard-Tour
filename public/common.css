@@ -52,3 +52,9 @@ img.shot { width: 100%; border-radius: 10px; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
 td, th { text-align: left; padding: 8px 6px; border-bottom: 1px solid #334155; }
 .qr-img { background: #fff; padding: 8px; border-radius: 10px; width: 180px; height: 180px; }
+
+@media print {
+  body { background: #fff; color: #000; }
+  .tabs, .btn-primary, .btn-ghost, .btn-sm, #toast { display: none !important; }
+  .card { border: 1px solid #ccc; }
+}

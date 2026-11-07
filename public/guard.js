@@ -242,3 +242,30 @@ async function doCheckout(qr) {
 }
 
 $('lg-name').focus();
+
+// ---------- แจ้งเหตุการณ์ ----------
+let incPhoto = null;
+function openIncident() { incPhoto = null; $('img-inc').classList.add('hidden'); $('inc-desc').value = '';
+  $('modal-incident').classList.remove('hidden'); }
+function closeIncident() { $('modal-incident').classList.add('hidden'); stopIncCam(); }
+function stopIncCam() { const v = $('cam-inc'); if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } }
+async function incShoot() {
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    const v = $('cam-inc'); v.srcObject = st; v.classList.remove('hidden'); await v.play();
+    setTimeout(() => {
+      const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      incPhoto = c.toDataURL('image/jpeg', 0.8);
+      $('img-inc').src = incPhoto; $('img-inc').classList.remove('hidden'); v.classList.add('hidden'); stopIncCam();
+    }, 600);
+  } catch (e) { toast('เปิดกล้องไม่ได้: ' + e.message); }
+}
+async function submitIncident() {
+  try {
+    const j = await api('/api/guard/incident', { shiftId: S.shift?.id, type: $('inc-type').value,
+      description: $('inc-desc').value.trim(), lat: S.myPos?.lat, lng: S.myPos?.lng, accuracy: S.myPos?.acc, photo: incPhoto });
+    closeIncident();
+    toast('📢 ส่งแจ้งเหตุการณ์ #' + j.id + ' แล้ว ' + (j.sent_to.length ? '→ ' + j.sent_to.join(', ') : '(เข้ากล่อง Admin)'));
+  } catch (e) { toast(e.message); }
+}

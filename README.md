@@ -15,6 +15,17 @@
 
 เอกสาร: [ออกแบบระบบ](docs/smart-guard-tour-design.md) · [สถาปัตยกรรม เอกสารออกแบบฉบับเต็ม: [`docs/smart-guard-tour-design.md`](docs/smart-guard-tour-design.md) โครงสร้างพัฒนาต่อ](docs/architecture.md)
 
+## 🚨 แจ้งเหตุการณ์จาก รปภ.
+แอป รปภ. มีปุ่ม **📢 แจ้งเหตุการณ์** (เลือกประเภท + รายละเอียด + ถ่ายรูป + ตำแหน่ง GPS อัตโนมัติ) → ส่งเฉพาะกลุ่มที่ตั้ง `event_type = incident` (หรือ `incident:<ประเภท>`) ใน 🔔 แจ้งเตือน + เด้งเข้าแผนที่สดของ Admin ทันที + เก็บในแท็บ 📋 รายงาน
+
+## 📊 ฮีตแมป & ส่งออกรายงาน (Admin)
+แท็บ 🗺️ แผนที่สดมีปุ่ม **🔥 ฮีตแมปจุดตรวจ**; ในรายงานกด **📥 CSV** หรือ **🖨️ พิมพ์/บันทึก PDF**
+
+## 🐳 รันด้วย Docker
+```bash
+docker compose up --build    # เปิดที่ http://localhost:3000
+```
+
 ## 🔐 SSO ผ่าน VVA
 เปิดใน ⚙️ ตั้งค่า → `sso_enabled = true` แล้วหน้าล็อกอินทุกหน้าจะมีปุ่ม **🔐 เข้าด้วย SSO** — ต้นแบบจำลอง VVA ด้วย signed token (`/api/sso/mock-issue` → `/api/sso/login`, ผูกบัญชีด้วย `vva_user_id`) — โปรดักชันสลับเป็น OAuth2/OIDC จริงได้เลย
 

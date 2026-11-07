@@ -123,12 +123,12 @@ settings(key, value, label)                            ← GPS interval, radii, 
 
 | สถานะ | งาน |
 |---|---|
-| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด, ออฟラインซิงก์, แดชบอร์ดสถิติ+audit log, สลับ tile แผนที่ (Google Maps), **SSO (mock VVA, เปิด/ปิดได้ใน ⚙️)** |
+| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด, ออฟラインซิงก์, แดชบอร์ดสถิติ+audit log, สลับ tile แผนที่ (Google Maps), **SSO (mock VVA, เปิด/ปิดได้ใน ⚙️)**, **แจ้งเหตุการณ์จาก รปภ. (incident → เฉพาะกลุ่มของเหตุการณ์นั้น)**, ฮีตแมปจุดตรวจ, ส่งออกรายงาน CSV/PDF, Docker packaging |
 | 🚧 โครงสร้างพร้อม | **Flutter native app** — โค้ดอยู่ที่ `apps/mobile/` (background_locator + Foreground Service + คิวออฟライン) — เหลือแค่ `flutter pub get && flutter run` |
 | 🚧 ต่อของจริง | SSO VVA — ต้นแบบรองรับแล้ว (`/api/sso/login`, ผูก `vva_user_id`) — โปรดักชันแค่สลับ mock-issue เป็น OAuth2/OIDC จริงของ VVA |
 | 🔲 ต่อไป | PostgreSQL+PostGIS, รูปเข้า S3/MinIO, Google Maps JS API เต็มรูปแบบ (marker แบบ native) |
 
-| 🔲 ต่อไป | ส่งออก PDF/Excel, Heatmap บนแผนที่ (ข้อมูลพร้อมแล้วใน /api/admin/stats) |
+| 🔲 ต่อไป | Excel แบบหลายชีต, แจ้งเตือน push ในแอปมือถือ |
 | 🔲 ต่อไป | แจ้งเตือน push ในแอป, 2-person verification จุดสำคัญ |
 
 ## 8. การรันต้นแบบ (Prototype)

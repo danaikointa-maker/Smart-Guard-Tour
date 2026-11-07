@@ -72,6 +72,7 @@ function connectWS() {
       }
     }
     else if (m.type === 'missed_cp') toast(`⚠️ กะ #${m.shiftId}: ${m.guard} ยังไม่เช็ค ${m.cp}`);
+    else if (m.type === 'incident') { toast(`🚨 เหตุการณ์ใหม่: ${m.incidentType} โดย ${m.guard}`); loadAll(); }
     else if (m.type === 'visit') toast(`📍 ${m.guard} เช็ค ${m.checkpoint} ${m.inside ? 'สำเร็จ' : '⚠️ นอกรัศมี'}`);
     else if (m.type === 'report') { toast(`📨 รายงานใหม่ #${m.reportId} จาก ${m.guard}`); loadAll(); }
     else if (m.type === 'shift') { loadAll(); }
@@ -189,6 +190,7 @@ function renderReports() {
 async function openReport(id) {
   try {
     const r = await api(`/api/admin/reports/${id}`);
+    lastReport = r;
     $('mr-title').textContent = `📋 รายงาน #${r.id} — ${r.guard_name} @ ${r.post_name}`;
     const d = r.detail;
     $('mr-body').innerHTML = `
@@ -343,3 +345,46 @@ function renderAudit() {
     initLiveMap(); connectWS();
   } catch (e) { localStorage.removeItem('sgt_admin_token'); localStorage.removeItem('sgt_admin_role'); }
 })();
+
+// ---------- เหตุการณ์ ----------
+function renderIncidents() {
+  const el = $('incident-list'); if (!el || !S.data.incidents) return;
+  el.innerHTML = S.data.incidents.map(i =>
+    `<div class="cp-item"><div>🚨 <b>${i.type}</b> โดย ${i.guard_name}<br>
+     <span class="muted">${i.ts.replace('T',' ').slice(0,19)} · ${i.lat ? '📍 ' + i.lat.toFixed(5) + ',' + i.lng.toFixed(5) : ''} ${i.description || ''}</span><br>
+     <span class="muted">ส่งถึง: ${i.sent_to || 'inbox'}</span></div>
+     ${i.photo ? `<img src="/uploads/${i.photo}" style="width:90px;border-radius:8px;">` : ''}</div>`).join('')
+    || '<p class="muted">ยังไม่มีเหตุการณ์</p>';
+}
+
+// ---------- ฮีตแมปจุดตรวจบนแผนที่สด ----------
+let heatLayer = null;
+async function toggleHeat() {
+  if (heatLayer) { S.mapLive.removeLayer(heatLayer); heatLayer = null; return; }
+  const s = await api('/api/admin/stats');
+  heatLayer = L.layerGroup();
+  const max = Math.max(1, ...s.checkpoint_stats.map(c => c.visited));
+  for (const c of s.checkpoint_stats) {
+    const cp = S.data.checkpoints.find(x => x.code === c.code);
+    if (!cp) continue;
+    L.circle([cp.lat, cp.lng], { radius: 40 + 260 * (c.visited / max), color: '#ef4444',
+      fillColor: '#ef4444', fillOpacity: 0.15 + 0.35 * (c.visited / max), weight: 1 })
+      .addTo(heatLayer).bindPopup(`${c.code}: ถูกเช็ค ${c.visited} ครั้ง`);
+  }
+  heatLayer.addTo(S.mapLive);
+  toast('🔥 ฮีตแมป: วงสีแดง = ความถี่การเช็คจุดตรวจ');
+}
+
+// ---------- ส่งออกรายงาน ----------
+let lastReport = null;
+async function exportCsv() {
+  if (!lastReport) return;
+  const d = lastReport.detail;
+  const rows = [['code','name','time','lat','lng','accuracy_m'],
+    ...d.visits.map(v => [v.code, v.name, v.ts, v.lat, v.lng, Math.round(v.accuracy || 0)])];
+  const csv = rows.map(r => r.map(x => '"' + String(x).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `report_${lastReport.id}.csv`; a.click();
+  toast('📥 ดาวน์โหลด CSV แล้ว');
+}

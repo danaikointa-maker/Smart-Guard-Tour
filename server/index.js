@@ -116,6 +116,9 @@ app.get('/api/admin/overview', auth, (req, res) => {
     ).all(),
     reports: db.prepare('SELECT * FROM reports ORDER BY id DESC LIMIT 50').all(),
     notif: db.prepare('SELECT * FROM notif_groups ORDER BY id').all(),
+    incidents: db.prepare(
+      `SELECT i.*, u.name guard_name FROM incidents i JOIN users u ON u.id=i.guard_id ORDER BY i.id DESC LIMIT 50`
+    ).all(),
     audit: db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100').all(),
   });
 });
@@ -564,6 +567,7 @@ app.get('/api/admin/stats', auth, (req, res) => {
       shifts_today: q("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=date('now')").c,
       reports: q('SELECT COUNT(*) c FROM reports').c,
       sos: q("SELECT COUNT(*) c FROM audit_logs WHERE action='sos'").c,
+      incidents: q('SELECT COUNT(*) c FROM incidents').c,
       gps_points: q('SELECT COUNT(*) c FROM gps_tracks').c,
     },
     avg_shift_minutes: dur ? Math.round(dur) : null,
@@ -596,6 +600,33 @@ app.post('/api/guard/sync', auth, (req, res) => {
     }
   }
   res.json({ ok: true, positions: pOk, visits_ok: vOk, visits_outside: vFail });
+});
+
+
+// ---------- รปภ.: แจ้งเหตุการณ์ (ส่งเฉพาะกลุ่มของเหตุการณ์นั้น) ----------
+app.post('/api/guard/incident', auth, async (req, res) => {
+  const { shiftId, type, description, lat, lng, accuracy, photo } = req.body || {};
+  if (!type) return res.status(400).json({ error: 'เลือกประเภทเหตุการณ์' });
+  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
+  let photoPath = null;
+  if (photo && String(photo).startsWith('data:image')) {
+    const buf = Buffer.from(String(photo).split(',')[1], 'base64');
+    photoPath = `inc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
+    fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+  }
+  const info = db.prepare(
+    'INSERT INTO incidents(shift_id,guard_id,type,description,lat,lng,accuracy,photo,sent_to,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
+  ).run(s ? s.id : null, req.user.userId, type, description || '', lat ?? null, lng ?? null, accuracy ?? null, photoPath, '', now());
+  const id = info.lastInsertRowid;
+  const text = `🚨 เหตุการณ์: ${type}\nโดย ${req.user.name}${s ? ' (กะ #' + s.id + ')' : ''}\n${description ?? ''}\n${lat != null ? '📍 ' + lat + ', ' + lng + ' — https://www.google.com/maps?q=$lat,$lng\n' : ''}เวลา ${now()}`;
+  // ส่งเฉพาะกลุ่มที่ตั้ง event_type = 'incident' หรือ 'incident:<type>'
+  const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type IN ('incident','incident:'||?)").all(type);
+  const sent = [];
+  for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { incidentId: id, type }));
+  db.prepare('UPDATE incidents SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', id);
+  audit(req.user.name, 'incident', { id, type });
+  broadcast({ type: 'incident', id, guard: req.user.name, incidentType: type, lat, lng, ts: now() });
+  res.json({ ok: true, id, sent_to: sent });
 });
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------

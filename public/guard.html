@@ -60,6 +60,7 @@
     <div id="cp-list"></div>
     <button class="btn-warn" onclick="goScanOut()">🏁 ถ่ายครบแล้ว — จบการตรวจ (สแกน QR)</button>
     <button class="btn-ghost" style="width:100%;margin-top:10px;background:#7f1d1d;color:#fca5a5;" onclick="sos()">🚨 SOS ฉุกเฉิน (แจ้งหัวหน้า + กลุ่ม LINE/Telegram)</button>
+    <button class="btn-warn" style="width:100%;margin-top:10px;" onclick="openIncident()">📢 แจ้งเหตุการณ์ (คนแปลกหน้า/อุปกรณ์เสีย/ไฟไหม้...)</button>
   </div>
 
   <!-- 4: สแกน QR เช็คเอาต์ -->
@@ -99,6 +100,30 @@
       <button class="btn-ghost" onclick="closeCam()">ยกเลิก</button>
       <button class="btn-ok" id="btn-shoot" onclick="shoot()">📸 ถ่ายรูป</button>
       <button class="btn-ok hidden" id="btn-send" onclick="sendVisit()">✔ ส่งเช็คจุดนี้</button>
+    </div>
+  </div>
+</div>
+
+<!-- modal แจ้งเหตุการณ์ -->
+<div id="modal-incident" class="modal hidden">
+  <div class="box">
+    <h2>📢 แจ้งเหตุการณ์</h2>
+    <select id="inc-type" style="margin-bottom:8px;">
+      <option value="คนแปลกหน้า">คนแปลกหน้า</option>
+      <option value="อุปกรณ์ชำรุด">อุปกรณ์ชำรุด</option>
+      <option value="ไฟไหม้/ฉุกเฉิน">ไฟไหม้/ฉุกเฉิน</option>
+      <option value="อุบัติเหตุ">อุบัติเหตุ</option>
+      <option value="อื่นๆ">อื่นๆ</option>
+    </select>
+    <input id="inc-desc" placeholder="รายละเอียด (ไม่บังคับ)" style="margin-bottom:8px;">
+    <video id="cam-inc" autoplay playsinline muted class="hidden"></video>
+    <img id="img-inc" class="shot hidden" alt="รูปเหตุการณ์">
+    <div class="row" style="margin:8px 0;">
+      <button class="btn-sm btn-ghost" onclick="incShoot()">📷 ถ่ายรูปประกอบ</button>
+    </div>
+    <div class="row">
+      <button class="btn-ghost" onclick="closeIncident()">ยกเลิก</button>
+      <button class="btn-warn" onclick="submitIncident()">✔ ส่งแจ้งเหตุการณ์</button>
     </div>
   </div>
 </div>
