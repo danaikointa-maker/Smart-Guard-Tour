@@ -353,7 +353,7 @@ function renderIncidents() {
     `<div class="cp-item"><div>🚨 <b>${i.type}</b> โดย ${i.guard_name}<br>
      <span class="muted">${i.ts.replace('T',' ').slice(0,19)} · ${i.lat ? '📍 ' + i.lat.toFixed(5) + ',' + i.lng.toFixed(5) : ''} ${i.description || ''}</span><br>
      <span class="muted">ส่งถึง: ${i.sent_to || 'inbox'}</span></div>
-     ${i.photo ? `<img src="/uploads/${i.photo}" style="width:90px;border-radius:8px;">` : ''}</div>`).join('')
+     ${i.photo ? `<img src="${i.photo.startsWith('http') ? i.photo : '/uploads/' + i.photo}" style="width:90px;border-radius:8px;">` : ''}</div>`).join('')
     || '<p class="muted">ยังไม่มีเหตุการณ์</p>';
 }
 

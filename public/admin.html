@@ -162,6 +162,7 @@
     <div id="mr-body"></div>
     <div class="row" style="margin-top:12px;">
       <button class="btn-sm btn-ghost" onclick="exportCsv()">📥 ส่งออก CSV</button>
+      <button class="btn-sm btn-ghost" onclick="if(lastReport) location.href='/api/admin/reports/'+lastReport.id+'/export.xlsx'">📊 ส่งออก Excel</button>
       <button class="btn-sm btn-ghost" onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button>
       <button class="btn-ghost" style="width:100%;" onclick="$('modal-report').classList.add('hidden')">ปิด</button>
     </div>

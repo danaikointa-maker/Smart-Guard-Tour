@@ -2,7 +2,7 @@ const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
-const DATA_DIR = path.join(__dirname, '..', 'data');
+const DATA_DIR = process.env.SGT_DATA_DIR || path.join(__dirname, '..', 'data');
 const UPLOAD_DIR = path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -189,6 +189,8 @@ if (userCount === 0) {
     ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
     ['sso_enabled', 'false', 'เปิด SSO ผ่านระบบ VVA (true/false)'],
     ['sso_provider_name', 'VVA SSO', 'ชื่อผู้ให้บริการ SSO (แสดงบนหน้าล็อกอิน)'],
+    ['map_provider', 'osm', 'ผู้ให้บริการแผนที่ (osm/google)'],
+    ['google_maps_api_key', '', 'Google Maps API Key (ใช้เมื่อ map_provider=google)'],
     ['map_tile_url', 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', 'แผนที่: Tile URL (Google Maps: https://mt{s}.google.com/vt/lyrs=m&hl=th&x={x}&y={y}&z={z}&key=YOUR_KEY)'],
   ];
   for (const s of seed) insSet.run(...s, now());

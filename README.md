@@ -26,6 +26,18 @@
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 🧪 ทดสอบอัตโนมัติ
+```bash
+npm test     # 11 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+```
+
+## 🏭 พร้อมโปรดักชัน
+- **SSO จริง (OAuth2/OIDC)**: ตั้ง env `VVA_SSO_AUTH_URL / VVA_SSO_TOKEN_URL / VVA_SSO_USERINFO_URL / VVA_SSO_CLIENT_ID / VVA_SSO_CLIENT_SECRET / SGT_PUBLIC_URL` แล้วปุ่ม SSO จะ redirect ไป VVA จริง (ไม่ตั้ง env = mock)
+- **รูปเข้า S3/MinIO**: ตั้ง env `S3_ENDPOINT / S3_BUCKET / S3_REGION / S3_ACCESS_KEY / S3_SECRET_KEY / S3_PUBLIC_URL`
+- **PostgreSQL+PostGIS**: `scripts/migrate-to-postgres.sql`
+- **Google Maps**: ⚙️ ตั้งค่า `map_provider=google` + `google_maps_api_key`
+- **Excel**: ปุ่ม 📊 ในหน้ารายงาน (3 ชีต: สรุป/จุดตรวจ/GPS)
+
 ## 🔐 SSO ผ่าน VVA
 เปิดใน ⚙️ ตั้งค่า → `sso_enabled = true` แล้วหน้าล็อกอินทุกหน้าจะมีปุ่ม **🔐 เข้าด้วย SSO** — ต้นแบบจำลอง VVA ด้วย signed token (`/api/sso/mock-issue` → `/api/sso/login`, ผูกบัญชีด้วย `vva_user_id`) — โปรดักชันสลับเป็น OAuth2/OIDC จริงได้เลย
 

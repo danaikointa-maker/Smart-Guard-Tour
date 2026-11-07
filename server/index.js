@@ -6,6 +6,8 @@ const { WebSocketServer } = require('ws');
 const { db, now, UPLOAD_DIR } = require('./db');
 const { haversineM } = require('./geo');
 const { makePostQRWithPng, verifyPostQR } = require('./qr');
+const { savePhoto } = require('./storage');
+const XLSX = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,6 +51,13 @@ app.get('/api/sso/mock-issue', (req, res) => {
   const name = String(req.query.name || 'สมชาย');
   const u = db.prepare('SELECT * FROM users WHERE name=?').get(name);
   if (!u) return res.status(404).json({ error: 'ไม่พบบัญชี ' + name + ' — สร้างในแท็บผู้ใช้ก่อน' });
+  if (req.query.redirect === '1') {
+    // โหมดเดโม่: ออก session token ตรงๆ แล้วเด้งไปหน้า sso-done (ข้ามขั้นตอน VVA)
+    const token = crypto.randomBytes(24).toString('hex');
+    tokens.set(token, { userId: u.id, role: u.role, name: u.name });
+    audit(u.name, 'sso_login_mock', {});
+    return res.send(`<script>localStorage.setItem('sgt_sso_token', '${token}'); location.href = '/sso-done.html';</script>`);
+  }
   res.json({ vva_token: makeMockVvaToken(String(u.id), u.name), provider: 'VVA SSO (mock)' });
 });
 
@@ -80,7 +89,74 @@ app.post('/api/sso/login', (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role }, via: 'sso' });
 });
 
+
+// ---------- SSO แบบ OAuth2/OIDC จริง (ต่อ VVA) ----------
+// ตั้งค่าใน env: VVA_SSO_AUTH_URL, VVA_SSO_TOKEN_URL, VVA_SSO_USERINFO_URL,
+// VVA_SSO_CLIENT_ID, VVA_SSO_CLIENT_SECRET, SGT_PUBLIC_URL
+// ถ้าไม่ตั้ง env → ใช้โหมด mock เดิม (mock-issue)
+const ssoStates = new Map(); // state -> {name, ts}
+function ssoConfigured() {
+  return !!(process.env.VVA_SSO_AUTH_URL && process.env.VVA_SSO_CLIENT_ID && process.env.SGT_PUBLIC_URL);
+}
+
+// Step 1: redirect ไปหน้า login ของ VVA
+app.get('/api/sso/authorize', (req, res) => {
+  const name = String(req.query.name || '');
+  if (!ssoConfigured()) return res.redirect('/api/sso/mock-issue?name=' + encodeURIComponent(name) + '&redirect=1');
+  const state = crypto.randomBytes(12).toString('hex');
+  ssoStates.set(state, { name, ts: Date.now() });
+  const redirectUri = encodeURIComponent(process.env.SGT_PUBLIC_URL + '/api/sso/callback');
+  const url = `${process.env.VVA_SSO_AUTH_URL}?response_type=code&client_id=${process.env.VVA_SSO_CLIENT_ID}&redirect_uri=${redirectUri}&scope=openid%20profile&state=${state}`;
+  res.redirect(url);
+});
+
+// Step 2: VVA redirect กลับมาพร้อม code → แลก token → อ่าน userinfo → ผูกบัญชี
+app.get('/api/sso/callback', async (req, res) => {
+  const { code, state } = req.query;
+  const st = ssoStates.get(state || '');
+  if (!st || Date.now() - st.ts > 10 * 60 * 1000) return res.status(400).send('state ไม่ถูกต้องหรือหมดอายุ');
+  ssoStates.delete(state);
+  try {
+    const tokenRes = await fetch(process.env.VVA_SSO_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code', code: String(code),
+        redirect_uri: process.env.SGT_PUBLIC_URL + '/api/sso/callback',
+        client_id: process.env.VVA_SSO_CLIENT_ID,
+        client_secret: process.env.VVA_SSO_CLIENT_SECRET || '',
+      }),
+    });
+    const vvaTokens = await tokenRes.json();
+    const uiRes = await fetch(process.env.VVA_SSO_USERINFO_URL || process.env.VVA_SSO_AUTH_URL.replace('/authorize', '/userinfo'), {
+      headers: { Authorization: 'Bearer ' + vvaTokens.access_token },
+    });
+    const ui = await uiRes.json();
+    const sub = String(ui.sub || ui.id || '');
+    const name = ui.name || ui.preferred_username || st.name;
+    let user = db.prepare('SELECT * FROM users WHERE vva_user_id=?').get(sub);
+    if (!user) {
+      user = db.prepare('SELECT * FROM users WHERE name=?').get(name);
+      if (user) db.prepare('UPDATE users SET vva_user_id=? WHERE id=?').run(sub, user.id);
+      else {
+        const info = db.prepare('INSERT INTO users(name,pin,role,vva_user_id) VALUES(?,?,?,?)')
+          .run(name, crypto.randomBytes(3).toString('hex'), 'guard', sub);
+        user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
+      }
+    }
+    audit(name, 'sso_login_oidc', { iss: 'vva' });
+    const token = crypto.randomBytes(24).toString('hex');
+    tokens.set(token, { userId: user.id, role: user.role, name: user.name });
+    // ส่ง token กลับหน้าเว็บด้วย fragment (ไม่ log) — หน้าเว็บอ่านแล้ว login
+    res.send(`<script>localStorage.setItem('sgt_sso_token', '${token}'); location.href = '/sso-done.html';</script>`);
+  } catch (e) {
+    res.status(500).send('SSO callback error: ' + e.message);
+  }
+});
+
 // ---------- auth ----------
+app.get('/api/me', auth, (req, res) => res.json(req.user));
+
 app.post('/api/login', (req, res) => {
   const { name, pin } = req.body || {};
   const row = db.prepare('SELECT * FROM users WHERE name=? AND pin=?').get(name, pin);
@@ -354,7 +430,7 @@ function savePosition(shift, lat, lng, accuracy) {
 }
 
 // ---------- guard: ถ่ายรูปเช็คจุดตรวจ + ตรวจ geofence ----------
-app.post('/api/guard/visit', auth, (req, res) => {
+app.post('/api/guard/visit', auth, async (req, res) => {
   const { shiftId, checkpointId, lat, lng, accuracy, photo } = req.body || {};
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
   if (!s || s.status === 'checked_out') return res.status(400).json({ error: 'กะไม่ active' });
@@ -366,8 +442,7 @@ app.post('/api/guard/visit', auth, (req, res) => {
   let photoPath = null;
   if (photo && typeof photo === 'string' && photo.startsWith('data:image')) {
     const buf = Buffer.from(photo.split(',')[1], 'base64');
-    photoPath = `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+    photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
   }
   const info = db.prepare(
     'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)'
@@ -577,7 +652,7 @@ app.get('/api/admin/stats', auth, (req, res) => {
 });
 
 // ---------- guard: ซิงก์ออฟไลน์ (คิวในเครื่อง) ----------
-app.post('/api/guard/sync', auth, (req, res) => {
+app.post('/api/guard/sync', auth, async (req, res) => {
   const { positions = [], visits = [] } = req.body || {};
   const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
   let pOk = 0, vOk = 0, vFail = 0;
@@ -591,8 +666,7 @@ app.post('/api/guard/sync', auth, (req, res) => {
       let photoPath = null;
       if (v.photo && String(v.photo).startsWith('data:image')) {
         const buf = Buffer.from(String(v.photo).split(',')[1], 'base64');
-        photoPath = `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
-        fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+        photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
       }
       db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)')
         .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, v.ts || now());
@@ -611,8 +685,7 @@ app.post('/api/guard/incident', auth, async (req, res) => {
   let photoPath = null;
   if (photo && String(photo).startsWith('data:image')) {
     const buf = Buffer.from(String(photo).split(',')[1], 'base64');
-    photoPath = `inc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+    photoPath = await savePhoto(UPLOAD_DIR, `inc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
   }
   const info = db.prepare(
     'INSERT INTO incidents(shift_id,guard_id,type,description,lat,lng,accuracy,photo,sent_to,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
@@ -627,6 +700,38 @@ app.post('/api/guard/incident', auth, async (req, res) => {
   audit(req.user.name, 'incident', { id, type });
   broadcast({ type: 'incident', id, guard: req.user.name, incidentType: type, lat, lng, ts: now() });
   res.json({ ok: true, id, sent_to: sent });
+});
+
+
+// ---------- admin: ส่งออกรายงานเป็น Excel (.xlsx) ----------
+app.get('/api/admin/reports/:id/export.xlsx', auth, (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const r = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'ไม่พบรายงาน' });
+  const d = JSON.parse(r.detail || '{}');
+  const visits = db.prepare(
+    `SELECT v.*, c.code, c.name cp_name FROM visits v JOIN checkpoints c ON c.id=v.checkpoint_id
+     WHERE v.shift_id=? ORDER BY v.id`).all(r.shift_id);
+  const track = db.prepare('SELECT lat,lng,accuracy,ts FROM gps_tracks WHERE shift_id=? ORDER BY id').all(r.shift_id);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['รายงานกะตรวจ #' + r.id], ['รปภ.', d.guard || r.guard_name], ['ป้อม', d.post || r.post_name],
+    ['เริ่ม', d.started_at || ''], ['จบ', d.ended_at || ''], ['เช็คจุดสำเร็จ', `${d.checkpoints_visited}/${d.checkpoints_total}`],
+    ['จุด GPS', d.gps_points ?? track.length], ['ส่งถึง', r.sent_to || 'inbox'],
+  ]), 'สรุป');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['รหัสจุด', 'ชื่อ', 'เวลา', 'ละติจูด', 'ลองจิจูด', 'ความแม่นยำ (ม.)', 'ในรัศมี', 'รูป'],
+    ...visits.map(v => [v.code, v.cp_name, v.ts, v.lat, v.lng, Math.round(v.accuracy || 0), v.inside ? 'ใช่' : 'ไม่', v.photo || '']),
+  ]), 'จุดตรวจ');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['#', 'เวลา', 'ละติจูด', 'ลองจิจูด', 'ความแม่นยำ (ม.)'],
+    ...track.map((t, i) => [i + 1, t.ts, t.lat, t.lng, Math.round(t.accuracy || 0)]),
+  ]), 'เส้นทาง GPS');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="report_${r.id}.xlsx"`);
+  res.send(buf);
 });
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------

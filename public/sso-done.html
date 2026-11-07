@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="th">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>เข้าสู่ระบบสำเร็จ — Smart Guard Tour</title><link rel="stylesheet" href="/common.css"></head>
+<body><div class="container" style="text-align:center;padding-top:80px;">
+  <div style="font-size:52px;">✅</div><h1>เข้าสู่ระบบผ่าน SSO สำเร็จ</h1><p class="muted" id="msg">กำลังพาไปหน้าที่เหมาะสม…</p>
+</div>
+<script>
+const t = localStorage.getItem('sgt_sso_token');
+if (!t) { document.getElementById('msg').textContent = 'ไม่พบ token — ลองเข้าสู่ระบบใหม่'; }
+else {
+  localStorage.removeItem('sgt_sso_token');
+  fetch('/api/me', { headers: { 'x-token': t } }).then(r => r.json()).then(j => {
+    if (j.error) throw new Error(j.error);
+    if (j.role === 'admin' || j.role === 'supervisor') { localStorage.setItem('sgt_admin_token', t); localStorage.setItem('sgt_admin_role', j.role); location.href = '/admin.html'; }
+    else if (j.role === 'resident') { localStorage.setItem('sgt_res_token', t); location.href = '/resident.html'; }
+    else { localStorage.setItem('sgt_token', t); location.href = '/guard.html'; }
+  }).catch(e => { document.getElementById('msg').textContent = e.message; });
+}
+</script></body></html>
