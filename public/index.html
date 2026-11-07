@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Smart Guard Tour</title>
+<link rel="stylesheet" href="/common.css">
+</head>
+<body>
+<div class="container" style="text-align:center; padding-top:60px;">
+  <div style="font-size:52px;">🛡️</div>
+  <h1>Smart Guard Tour</h1>
+  <p class="muted">ระบบตรวจตราของ รปภ. — เช็คอิน ถ่ายรูปตามจุด เช็คเอาต์ ส่งรายงานอัตโนมัติ</p>
+  <div class="card">
+    <a href="/guard.html"><button class="btn-ok">📱 แอป รปภ. (Guard App)</button></a>
+    <p class="muted" style="margin:10px 0 0;">สแกน QR ที่ป้อมเพื่อเริ่มกะ</p>
+  </div>
+  <div class="card">
+    <a href="/admin.html"><button class="btn-primary">🖥️ ระบบหลังบ้าน (Admin)</button></a>
+    <p class="muted" style="margin:10px 0 0;">แผนที่สด QR จุดตรวจ รายงาน</p>
+  </div>
+  <div class="card">
+    <a href="/resident.html"><button class="btn-ghost" style="width:100%;font-size:18px;padding:14px;">🏠 แอปลูกบ้าน (ดูสถานะการตรวจ)</button></a>
+  </div>
+  <p class="muted" style="margin-top:24px;">บัญชีเดโม่ — รปภ.: <b>สมชาย / 1234</b> · หัวหน้า: <b>วินัย / 1234</b> · ลูกบ้าน: <b>ลูกบ้าน A / 1234</b> · Admin: <b>admin / admin123</b></p>
+</div>
+<div id="toast"></div>
+<script>
+const toast = (m) => { const t = document.getElementById('toast'); t.textContent = m; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); };
+</script>
+</body>
+</html>

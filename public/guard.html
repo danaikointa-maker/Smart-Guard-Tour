@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>รปภ. — Smart Guard Tour</title>
+<link rel="stylesheet" href="/common.css">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+</head>
+<body>
+<div class="container">
+
+  <!-- 0: ล็อกอิน -->
+  <div id="scr-login">
+    <h1>🛡️ Smart Guard Tour</h1>
+    <div class="card">
+      <h2>เข้าสู่ระบบ รปภ.</h2>
+      <input id="lg-name" placeholder="ชื่อ (เช่น สมชาย)" style="margin-bottom:10px;">
+      <input id="lg-pin" type="password" inputmode="numeric" placeholder="PIN 4 หลัก" style="margin-bottom:12px;">
+      <button class="btn-primary" onclick="doLogin()">เข้าสู่ระบบ</button>
+      <button id="btn-sso" class="btn-ghost hidden" style="width:100%;margin-top:10px;"></button>
+    </div>
+    <p class="muted">เดโม่: สมชาย / 1234 หรือ วันดี / 1234</p>
+  </div>
+
+  <!-- 1: สแกน QR เช็คอิน -->
+  <div id="scr-scanin" class="hidden">
+    <h1>① สแกน QR ที่ป้อม</h1>
+    <div class="card">
+      <video id="cam-in" autoplay playsinline muted></video>
+      <p id="scanin-status" class="muted" style="text-align:center;">กำลังมองหา QR…</p>
+    </div>
+    <div class="card">
+      <p class="muted">หากสแกนไม่ได้ พิมพ์รหัส QR ด้วยตนเอง:</p>
+      <input id="qr-manual-in" placeholder="SGT1:P:..." style="margin-bottom:10px;">
+      <button class="btn-ghost" onclick="manualCheckin()">เช็คอินด้วยรหัส</button>
+    </div>
+  </div>
+
+  <!-- 2: เริ่มปฏิบัติงาน -->
+  <div id="scr-start" class="hidden">
+    <h1>✅ เช็คอินสำเร็จ</h1>
+    <div class="card" style="text-align:center;">
+      <div style="font-size:44px;">🚔</div>
+      <div class="big" id="start-post">—</div>
+      <p class="muted" id="start-info">—</p>
+      <button class="btn-ok" onclick="startShift()">▶ เริ่มปฏิบัติงาน</button>
+      <p class="muted" style="margin-top:10px;">กดแล้วระบบจะเริ่มติดตาม GPS อัตโนมัติ</p>
+    </div>
+  </div>
+
+  <!-- 3: ตรวจตรา -->
+  <div id="scr-patrol" class="hidden">
+    <h1>🚶 กำลังตรวจตรา <span class="tag tag-ok" id="prog">0/0</span></h1>
+    <div id="gmap"></div>
+    <div class="card">
+      <div class="row"><span class="muted">📍 ตำแหน่งของฉัน:</span><b id="mypos">—</b></div>
+      <div class="row"><span class="muted">🎯 ความแม่นยำ GPS:</span><b id="myacc">—</b></div>
+    </div>
+    <div id="cp-list"></div>
+    <button class="btn-warn" onclick="goScanOut()">🏁 ถ่ายครบแล้ว — จบการตรวจ (สแกน QR)</button>
+    <button class="btn-ghost" style="width:100%;margin-top:10px;background:#7f1d1d;color:#fca5a5;" onclick="sos()">🚨 SOS ฉุกเฉิน (แจ้งหัวหน้า + กลุ่ม LINE/Telegram)</button>
+  </div>
+
+  <!-- 4: สแกน QR เช็คเอาต์ -->
+  <div id="scr-scanout" class="hidden">
+    <h1>④ สแกน QR อีกครั้งเพื่อจบงาน</h1>
+    <div class="card">
+      <video id="cam-out" autoplay playsinline muted></video>
+      <p id="scanout-status" class="muted" style="text-align:center;">กำลังมองหา QR…</p>
+    </div>
+    <div class="card">
+      <input id="qr-manual-out" placeholder="SGT1:P:..." style="margin-bottom:10px;">
+      <button class="btn-ghost" onclick="manualCheckout()">จบงานด้วยรหัส</button>
+    </div>
+  </div>
+
+  <!-- 5: เสร็จ -->
+  <div id="scr-done" class="hidden">
+    <div class="card" style="text-align:center;">
+      <div style="font-size:52px;">✅</div>
+      <div class="big">ส่งรายงานเรียบร้อย</div>
+      <p id="done-info" class="muted">—</p>
+      <button class="btn-primary" onclick="location.reload()">เริ่มกะใหม่</button>
+    </div>
+  </div>
+
+</div>
+
+<!-- modal ถ่ายรูป -->
+<div id="modal-cam" class="modal hidden">
+  <div class="box">
+    <h2>📷 ถ่ายรูปจุด <span id="cam-cp"></span></h2>
+    <video id="cam-shot" autoplay playsinline muted></video>
+    <canvas id="canvas-shot" class="hidden"></canvas>
+    <img id="img-shot" class="shot hidden" alt="รูปที่ถ่าย">
+    <p id="cam-dist" class="muted" style="text-align:center;"></p>
+    <div class="row" style="margin-top:10px;">
+      <button class="btn-ghost" onclick="closeCam()">ยกเลิก</button>
+      <button class="btn-ok" id="btn-shoot" onclick="shoot()">📸 ถ่ายรูป</button>
+      <button class="btn-ok hidden" id="btn-send" onclick="sendVisit()">✔ ส่งเช็คจุดนี้</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/maps.js"></script>
+<script src="/vendor/jsqr/jsQR.js"></script>
+<script src="/guard.js"></script>
+<script src="/sso.js"></script>
+<script>ssoMaybeShow("btn-sso", "lg-name", (j) => S.token=j.token;S.me=j.user;localStorage.setItem('sgt_token',j.token);toast('เข้าระบบผ่าน SSO ✅ '+j.user.name);goScanIn());</script>
+</body>
+</html>
