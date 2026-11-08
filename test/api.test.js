@@ -136,3 +136,36 @@ test('ต้องมี token ถึงเข้าถึง admin ได้', 
   const { status } = await api('GET', '/api/admin/overview');
   assert.equal(status, 401);
 });
+
+test('two-person verification: จุดต้อง 2 คน — คนแรก pending, คนที่สองมา → confirmed', async () => {
+  // เปิด flag ที่จุดแรก
+  const cp0 = (await api('GET', '/api/admin/overview', null, adminTok)).j.checkpoints[0];
+  let r = await api('PUT', `/api/admin/checkpoints/${cp0.id}`, { require_two_person: true }, adminTok);
+  assert.equal(r.status, 200);
+
+  // สมชาย (token เดิม) สร้างกะใหม่แล้วเช็คจุด → pending
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const qr2 = ov.j.posts[0].qr;
+  const ci = await api('POST', '/api/guard/checkin', { qr: qr2 }, guardTok);
+  const sid = ci.j.shift.id;
+  await api('POST', '/api/guard/start', { shiftId: sid }, guardTok);
+  const v1 = await api('POST', '/api/guard/visit', { shiftId: sid, checkpointId: cp0.id, lat: cp0.lat, lng: cp0.lng, accuracy: 5 }, guardTok);
+  assert.equal(v1.status, 200);
+  assert.equal(v1.j.confirmed, 0); assert.equal(v1.j.pending, true);
+
+  // วันดี (รปภ. คนที่ 2) มาเช็คจุดเดียวกัน → จับคู่ confirmed
+  const g2 = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  const ci2 = await api('POST', '/api/guard/checkin', { qr: qr2 }, g2.j.token);
+  const sid2 = ci2.j.shift.id;
+  await api('POST', '/api/guard/start', { shiftId: sid2 }, g2.j.token);
+  const v2 = await api('POST', '/api/guard/visit', { shiftId: sid2, checkpointId: cp0.id, lat: cp0.lat, lng: cp0.lng, accuracy: 5 }, g2.j.token);
+  assert.equal(v2.status, 200);
+  assert.equal(v2.j.confirmed, 1); assert.equal(v2.j.paired, true);
+
+  // stats สะท้อน pending/confirmed
+  const st = await api('GET', '/api/admin/stats', null, adminTok);
+  assert.ok('pending_two_person' in st.j.totals);
+
+  // ปิด flag คืน
+  await api('PUT', `/api/admin/checkpoints/${cp0.id}`, { require_two_person: false }, adminTok);
+});

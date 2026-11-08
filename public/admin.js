@@ -156,8 +156,16 @@ function renderPosts() {
 }
 function renderCpsAdmin() {
   $('cp-list-admin').innerHTML = S.data.checkpoints.map(c =>
-    `<div class="cp-item"><div><b>${c.code}</b> ${c.name}<br><span class="muted">รัศมี ${c.radius} ม. · ลำดับ ${c.seq}</span></div>
-     <button class="btn-sm btn-ghost" onclick="delCp(${c.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีจุดตรวจ</p>';
+    `<div class="cp-item"><div><b>${c.code}</b> ${c.name}<br>
+     <span class="muted">รัศมี ${c.radius} ม. · ลำดับ ${c.seq}</span>
+     ${c.require_two_person ? ' <span class="tag tag-warn">👥 ต้อง 2 คนยืนยัน</span>' : ''}</div>
+     <div style="display:flex;gap:6px;">
+       <button class="btn-sm btn-ghost" onclick="toggleTwo(${c.id}, ${c.require_two_person ? 1 : 0})">👥 ${c.require_two_person ? 'ปิด' : 'เปิด'} 2 คน</button>
+       <button class="btn-sm btn-ghost" onclick="delCp(${c.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มีจุดตรวจ</p>';
+}
+async function toggleTwo(id, cur) {
+  try { await api(`/api/admin/checkpoints/${id}`, { require_two_person: !cur }, 'PUT'); toast('อัปเดตจุดตรวจแล้ว'); await loadAll(); }
+  catch (e) { toast(e.message); }
 }
 
 // ---------- QR ----------

@@ -295,6 +295,17 @@ app.post('/api/admin/checkpoints', auth, (req, res) => {
   res.json({ id: info.lastInsertRowid, code });
 });
 
+app.put('/api/admin/checkpoints/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, radius, require_two_person } = req.body || {};
+  const cp = db.prepare('SELECT * FROM checkpoints WHERE id=?').get(req.params.id);
+  if (!cp) return res.status(404).json({ error: 'ไม่พบจุดตรวจ' });
+  db.prepare('UPDATE checkpoints SET name=COALESCE(?,name), radius=COALESCE(?,radius), require_two_person=COALESCE(?,require_two_person) WHERE id=?')
+    .run(name ?? null, radius ?? null, require_two_person != null ? (require_two_person ? 1 : 0) : null, cp.id);
+  audit(req.user.name, 'checkpoint_update', { id: cp.id, code: cp.code });
+  res.json({ ok: true });
+});
+
 app.delete('/api/admin/checkpoints/:id', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
   db.prepare('DELETE FROM checkpoints WHERE id=?').run(req.params.id);
@@ -444,19 +455,34 @@ app.post('/api/guard/visit', auth, async (req, res) => {
     const buf = Buffer.from(photo.split(',')[1], 'base64');
     photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
   }
+  // two-person: ถ้าจุดนี้ต้อง 2 คน —เช็คว่ามี รปภ. อีกคนเช็คค้างไว้ใน 30 นาทีหรือไม่
+  let confirmed = 1, paired = false;
+  if (inside && cp.require_two_person) {
+    const other = db.prepare(
+      `SELECT v.* FROM visits v JOIN shifts s2 ON s2.id=v.shift_id
+       WHERE v.checkpoint_id=? AND v.inside=1 AND v.confirmed=0 AND s2.guard_id<>?
+       AND v.ts > datetime('now','-30 minutes') ORDER BY v.id DESC LIMIT 1`
+    ).get(cp.id, req.user.userId);
+    if (other) {
+      paired = true; confirmed = 1;
+      db.prepare('UPDATE visits SET confirmed=1, confirmed_by=? WHERE id=?').run(req.user.userId, other.id);
+    } else {
+      confirmed = 0; // รอคนที่ 2 มายืนยัน
+    }
+  }
   const info = db.prepare(
-    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)'
-  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, now());
+    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,confirmed_by,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
+  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, confirmed, paired ? req.user.userId : null, now());
   const visit = db.prepare('SELECT * FROM visits WHERE id=?').get(info.lastInsertRowid);
-  audit(req.user.name, inside ? 'visit_ok' : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist) });
-  broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, dist: Math.round(dist), ts: visit.ts });
+  audit(req.user.name, inside ? (confirmed ? 'visit_ok' : 'visit_pending') : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist), two: !!cp.require_two_person });
+  broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, confirmed, dist: Math.round(dist), ts: visit.ts });
   if (!inside) {
     return res.status(409).json({
       error: `ยังอยู่นอกรัศมีจุดตรวจ (ห่าง ${Math.round(dist)} ม. — ต้องไม่เกิน ${cp.radius} ม.)`,
       dist: Math.round(dist), radius: cp.radius, visitId: visit.id,
     });
   }
-  res.json({ ok: true, visit, dist: Math.round(dist), radius: cp.radius });
+  res.json({ ok: true, confirmed, paired, pending: !confirmed, visit, dist: Math.round(dist), radius: cp.radius });
 });
 
 // ---------- guard: สแกน QR เช็คเอาต์ + สร้างรายงาน ----------
@@ -476,6 +502,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
     `SELECT v.*, c.code, c.name cp_name FROM visits v JOIN checkpoints c ON c.id=v.checkpoint_id
      WHERE v.shift_id=? AND v.inside=1 ORDER BY v.id`
   ).all(s.id);
+  const pendingCount = visits.filter(v => !v.confirmed).length;
   const trackCount = db.prepare('SELECT COUNT(*) c FROM gps_tracks WHERE shift_id=?').get(s.id).c;
   const detail = {
     guard: req.user.name,
@@ -485,6 +512,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
     checked_out_at: now(),
     checkpoints_total: total,
     checkpoints_visited: visits.length,
+    pending_two_person: pendingCount,
     gps_points: trackCount,
     visits: visits.map((v) => ({
       code: v.code, name: v.cp_name, ts: v.ts,
@@ -643,6 +671,7 @@ app.get('/api/admin/stats', auth, (req, res) => {
       reports: q('SELECT COUNT(*) c FROM reports').c,
       sos: q("SELECT COUNT(*) c FROM audit_logs WHERE action='sos'").c,
       incidents: q('SELECT COUNT(*) c FROM incidents').c,
+      pending_two_person: q('SELECT COUNT(*) c FROM visits WHERE inside=1 AND confirmed=0').c,
       gps_points: q('SELECT COUNT(*) c FROM gps_tracks').c,
     },
     avg_shift_minutes: dur ? Math.round(dur) : null,
@@ -668,8 +697,8 @@ app.post('/api/guard/sync', auth, async (req, res) => {
         const buf = Buffer.from(String(v.photo).split(',')[1], 'base64');
         photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
       }
-      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)')
-        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, v.ts || now());
+      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,ts) VALUES(?,?,?,?,?,?,?,?,?)')
+        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, 1, v.ts || now());
       if (inside) vOk++; else vFail++;
     }
   }

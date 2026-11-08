@@ -116,6 +116,9 @@ addCol('notif_groups', 'channel', "TEXT NOT NULL DEFAULT 'webhook'");
 addCol('notif_groups', 'bot_token', "TEXT NOT NULL DEFAULT ''");
 addCol('notif_groups', 'chat_id', "TEXT NOT NULL DEFAULT ''");
 addCol('users', 'vva_user_id', "TEXT");
+addCol('checkpoints', 'require_two_person', 'INTEGER NOT NULL DEFAULT 0');
+addCol('visits', 'confirmed', 'INTEGER NOT NULL DEFAULT 1');
+addCol('visits', 'confirmed_by', 'INTEGER');
 
 const now = () => new Date().toISOString();
 const BASE = { lat: 13.7307, lng: 100.5418 }; // ลุมพินี (เดโม่)
