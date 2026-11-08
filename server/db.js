@@ -214,6 +214,7 @@ if (userCount === 0) {
     ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
     ['sso_enabled', 'false', 'เปิด SSO ผ่านระบบ VVA (true/false)'],
     ['sso_provider_name', 'VVA SSO', 'ชื่อผู้ให้บริการ SSO (แสดงบนหน้าล็อกอิน)'],
+    ['enforce_schedule', 'false', 'บังคับเช็คอินเฉพาะในเวร (true/false) — true = ปฏิเสธถ้านอกเวร'],
     ['gps_retention_days', '90', 'เก็บข้อมูล GPS ย้อนหลัง (วัน) — ลบอัตโนมัติเกินกว่านี้ (PDPA)'],
     ['map_provider', 'osm', 'ผู้ให้บริการแผนที่ (osm/google)'],
     ['google_maps_api_key', '', 'Google Maps API Key (ใช้เมื่อ map_provider=google)'],

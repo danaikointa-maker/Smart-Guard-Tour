@@ -442,7 +442,7 @@ app.post('/api/guard/checkin', auth, (req, res) => {
   const schedule = db.prepare(
     'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
   ).get(req.user.userId, today);
-  // เตือนถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
+  // เตือน/บังคับ ถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
   let scheduleWarning = null;
   if (schedule) {
     const nowBkk = new Date(Date.now() + 7 * 3600 * 1000);
@@ -450,7 +450,14 @@ app.post('/api/guard/checkin', auth, (req, res) => {
     const inWindow = schedule.start_time <= schedule.end_time
       ? (hm >= schedule.start_time && hm <= schedule.end_time)
       : (hm >= schedule.start_time || hm <= schedule.end_time); // ข้ามเที่ยงคืน
-    if (!inWindow) scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+    if (!inWindow) {
+      scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+      const enforce = db.prepare("SELECT value FROM settings WHERE key='enforce_schedule'").get();
+      if (enforce && enforce.value === 'true') {
+        audit(req.user.name, 'checkin_blocked_out_of_schedule', { hm, schedule: schedule.id });
+        return res.status(403).json({ error: scheduleWarning + ' — ระบบตั้งค่าให้บังคับเช็คอินในเวรเท่านั้น' });
+      }
+    }
   }
   audit(req.user.name, 'checkin', { shift: shift.id, post: post.name });
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
@@ -853,6 +860,56 @@ app.post('/api/admin/cleanup', auth, (req, res) => {
   res.json({ ok: true, deleted_gps: cleanupOldGps() });
 });
 setInterval(() => { try { cleanupOldGps(); } catch (e) { console.error('[cleanup]', e.message); } }, 24 * 60 * 60 * 1000);
+
+
+// ---------- admin: สำรอง/กู้คืนข้อมูล (JSON dump ทุกตาราง) ----------
+const TABLES = ['users','sites','posts','checkpoints','shifts','gps_tracks','visits','incidents','reports','notif_groups','settings','shift_schedules','audit_logs'];
+app.get('/api/admin/backup', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const out = { exported_at: now(), tables: {} };
+  for (const t of TABLES) out.tables[t] = db.prepare(`SELECT * FROM ${t}`).all();
+  audit(req.user.name, 'backup', { tables: TABLES.length });
+  res.setHeader('Content-Disposition', `attachment; filename="sgt-backup-${Date.now()}.json"`);
+  res.json(out);
+});
+app.post('/api/admin/restore', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const data = req.body || {};
+  if (!data.tables) return res.status(400).json({ error: 'ไฟล์สำรองไม่ถูกต้อง' });
+  for (const t of TABLES) {
+    if (!data.tables[t]) continue;
+    db.prepare(`DELETE FROM ${t}`).run();
+    const rows = data.tables[t];
+    if (!rows.length) continue;
+    const cols = Object.keys(rows[0]);
+    const ins = db.prepare(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
+    for (const row of rows) ins.run(...cols.map(c => row[c]));
+  }
+  audit(req.user.name, 'restore', { tables: Object.keys(data.tables).length });
+  res.json({ ok: true });
+});
+
+// ---------- admin: ส่งออกสถิติเป็น Excel ----------
+app.get('/api/admin/stats/export.xlsx', auth, async (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const s = db.prepare('SELECT 1').get(); // reuse stats logic inline
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    days.push([d, db.prepare("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=?").get(d).c,
+      db.prepare("SELECT COUNT(*) c FROM visits WHERE inside=1 AND substr(ts,1,10)=?").get(d).c]);
+  }
+  const cpStats = db.prepare(
+    `SELECT c.code, c.name, COUNT(v.id) visited FROM checkpoints c
+     LEFT JOIN visits v ON v.checkpoint_id=c.id AND v.inside=1 GROUP BY c.id ORDER BY c.seq`).all();
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['วันที่', 'จำนวนกะ', 'เช็คจุดสำเร็จ'], ...days]), '7 วันย้อนหลัง');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['รหัสจุด', 'ชื่อ', 'ครั้งที่ถูกเช็ค'], ...cpStats.map(c => [c.code, c.name, c.visited])]), 'จุดตรวจ');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="stats_${Date.now()}.xlsx"`);
+  res.send(buf);
+});
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {

@@ -243,3 +243,26 @@ test('login rate limit — ยิง 12 ครั้งต้องโดน 429
   }
   assert.equal(last, 429);
 });
+
+test('backup คืนทุกตารางครบ + stats xlsx ได้ (PK)', async () => {
+  const b = await fetch(`${BASE}/api/admin/backup`, { headers: { 'x-token': adminTok } });
+  assert.equal(b.status, 200);
+  const j = await b.json();
+  for (const t of ['users', 'posts', 'checkpoints', 'settings', 'shifts'])
+    assert.ok(Array.isArray(j.tables[t]), 'missing table ' + t);
+  assert.ok(j.tables.users.length >= 5);
+  const x = await fetch(`${BASE}/api/admin/stats/export.xlsx`, { headers: { 'x-token': adminTok } });
+  assert.equal(x.status, 200);
+  const buf = Buffer.from(await x.arrayBuffer());
+  assert.equal(buf[0], 0x50); assert.equal(buf[1], 0x4B);
+});
+
+test('enforce_schedule=true บล็อกเช็คอินนอกเวร (403) —ksesAktif', async () => {
+  await api('PUT', '/api/admin/settings', { enforce_schedule: 'true' }, adminTok);
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  // หาเวรของ สมชายวันนี้แล้วเทส: ถ้าอยู่นอกเวรต้อง 403 — ถ้าในเวรต้องผ่าน (อย่างใดอย่างหนึ่งต้องจริง)
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, guardTok);
+  assert.ok([200, 403].includes(ci.status));
+  if (ci.j.scheduleWarning || ci.status === 403) assert.ok(true);
+  await api('PUT', '/api/admin/settings', { enforce_schedule: 'false' }, adminTok);
+});

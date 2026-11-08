@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 📦 สำรอง/กู้คืน + ⏰ บังคับเวร
+แท็บ 📊 สถิติมีปุ่ม **📦 ดาวน์โหลดสำรองข้อมูล (JSON ทุกตาราง)** และ **♻️ กู้คืน** · ตั้งค่า `enforce_schedule=true` ใน ⚙️ → รปภ.เช็คอินนอกเวรจะถูกปฏิเสธ (403) · ปุ่ม **📊 ส่งออกสถิติ Excel**
+
 ## 🚨 วงจรเหตุการณ์ + 🧹 Retention (PDPA)
 เหตุการณ์มีสถานะ open → resolved (admin กด "✔ แก้แล้ว" ในแท็บ 📋, มี realtime broadcast) · ข้อมูล GPS เก่ากว่าที่ตั้งค่า `gps_retention_days` (เริ่มต้น 90 วัน) จะถูกลบอัตโนมัติทุกวัน หรือกดรันเองผ่าน `POST /api/admin/cleanup`
 
@@ -42,7 +45,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 20 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 22 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

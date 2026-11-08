@@ -420,3 +420,24 @@ async function resolveIncident(id) {
   try { await api(`/api/admin/incidents/${id}/resolve`, {}); toast('บันทึกว่าแก้แล้ว ✅'); await loadAll(); }
   catch (e) { toast(e.message); }
 }
+
+// ---------- สำรอง/กู้คืน ----------
+// download link ต้องแนบ token — ใช้ fetch แล้วสร้าง blob แทน
+function sgtAuthHref(a) {
+  fetch(a.getAttribute('href'), { headers: { 'x-token': S.token } })
+    .then(r => r.blob()).then(b => {
+      const u = URL.createObjectURL(b);
+      const t = document.createElement('a'); t.href = u; t.download = a.href.includes('backup') ? 'sgt-backup.json' : 'stats.xlsx'; t.click();
+    });
+  return false;
+}
+async function restoreBackup() {
+  const f = $('restore-file'); f.classList.remove('hidden'); f.onchange = async () => {
+    const file = f.files[0]; if (!file) return;
+    if (!confirm('⚠️ กู้คืนจะเขียนทับข้อมูลทั้งหมด — แน่ใจนะ?')) return;
+    const txt = await file.text();
+    try { await api('/api/admin/restore', JSON.parse(txt)); toast('กู้คืนสำเร็จ ♻️ — โหลดใหม่'); loadAll(); }
+    catch (e) { toast(e.message); }
+  };
+  f.click();
+}
