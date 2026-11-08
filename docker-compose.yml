@@ -1,0 +1,13 @@
+services:
+  smart-guard-tour:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads
+    environment:
+      - PORT=3000
+      - SGT_SECRET=${SGT_SECRET:-change-me}
+      - VVA_SSO_SECRET=${VVA_SSO_SECRET:-change-me}
+    restart: unless-stopped

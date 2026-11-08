@@ -6,6 +6,8 @@ const { WebSocketServer } = require('ws');
 const { db, now, UPLOAD_DIR } = require('./db');
 const { haversineM } = require('./geo');
 const { makePostQRWithPng, verifyPostQR } = require('./qr');
+const { savePhoto } = require('./storage');
+const XLSX = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -49,6 +51,13 @@ app.get('/api/sso/mock-issue', (req, res) => {
   const name = String(req.query.name || 'สมชาย');
   const u = db.prepare('SELECT * FROM users WHERE name=?').get(name);
   if (!u) return res.status(404).json({ error: 'ไม่พบบัญชี ' + name + ' — สร้างในแท็บผู้ใช้ก่อน' });
+  if (req.query.redirect === '1') {
+    // โหมดเดโม่: ออก session token ตรงๆ แล้วเด้งไปหน้า sso-done (ข้ามขั้นตอน VVA)
+    const token = crypto.randomBytes(24).toString('hex');
+    tokens.set(token, { userId: u.id, role: u.role, name: u.name });
+    audit(u.name, 'sso_login_mock', {});
+    return res.send(`<script>localStorage.setItem('sgt_sso_token', '${token}'); location.href = '/sso-done.html';</script>`);
+  }
   res.json({ vva_token: makeMockVvaToken(String(u.id), u.name), provider: 'VVA SSO (mock)' });
 });
 
@@ -80,7 +89,74 @@ app.post('/api/sso/login', (req, res) => {
   res.json({ token, user: { id: user.id, name: user.name, role: user.role }, via: 'sso' });
 });
 
+
+// ---------- SSO แบบ OAuth2/OIDC จริง (ต่อ VVA) ----------
+// ตั้งค่าใน env: VVA_SSO_AUTH_URL, VVA_SSO_TOKEN_URL, VVA_SSO_USERINFO_URL,
+// VVA_SSO_CLIENT_ID, VVA_SSO_CLIENT_SECRET, SGT_PUBLIC_URL
+// ถ้าไม่ตั้ง env → ใช้โหมด mock เดิม (mock-issue)
+const ssoStates = new Map(); // state -> {name, ts}
+function ssoConfigured() {
+  return !!(process.env.VVA_SSO_AUTH_URL && process.env.VVA_SSO_CLIENT_ID && process.env.SGT_PUBLIC_URL);
+}
+
+// Step 1: redirect ไปหน้า login ของ VVA
+app.get('/api/sso/authorize', (req, res) => {
+  const name = String(req.query.name || '');
+  if (!ssoConfigured()) return res.redirect('/api/sso/mock-issue?name=' + encodeURIComponent(name) + '&redirect=1');
+  const state = crypto.randomBytes(12).toString('hex');
+  ssoStates.set(state, { name, ts: Date.now() });
+  const redirectUri = encodeURIComponent(process.env.SGT_PUBLIC_URL + '/api/sso/callback');
+  const url = `${process.env.VVA_SSO_AUTH_URL}?response_type=code&client_id=${process.env.VVA_SSO_CLIENT_ID}&redirect_uri=${redirectUri}&scope=openid%20profile&state=${state}`;
+  res.redirect(url);
+});
+
+// Step 2: VVA redirect กลับมาพร้อม code → แลก token → อ่าน userinfo → ผูกบัญชี
+app.get('/api/sso/callback', async (req, res) => {
+  const { code, state } = req.query;
+  const st = ssoStates.get(state || '');
+  if (!st || Date.now() - st.ts > 10 * 60 * 1000) return res.status(400).send('state ไม่ถูกต้องหรือหมดอายุ');
+  ssoStates.delete(state);
+  try {
+    const tokenRes = await fetch(process.env.VVA_SSO_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code', code: String(code),
+        redirect_uri: process.env.SGT_PUBLIC_URL + '/api/sso/callback',
+        client_id: process.env.VVA_SSO_CLIENT_ID,
+        client_secret: process.env.VVA_SSO_CLIENT_SECRET || '',
+      }),
+    });
+    const vvaTokens = await tokenRes.json();
+    const uiRes = await fetch(process.env.VVA_SSO_USERINFO_URL || process.env.VVA_SSO_AUTH_URL.replace('/authorize', '/userinfo'), {
+      headers: { Authorization: 'Bearer ' + vvaTokens.access_token },
+    });
+    const ui = await uiRes.json();
+    const sub = String(ui.sub || ui.id || '');
+    const name = ui.name || ui.preferred_username || st.name;
+    let user = db.prepare('SELECT * FROM users WHERE vva_user_id=?').get(sub);
+    if (!user) {
+      user = db.prepare('SELECT * FROM users WHERE name=?').get(name);
+      if (user) db.prepare('UPDATE users SET vva_user_id=? WHERE id=?').run(sub, user.id);
+      else {
+        const info = db.prepare('INSERT INTO users(name,pin,role,vva_user_id) VALUES(?,?,?,?)')
+          .run(name, crypto.randomBytes(3).toString('hex'), 'guard', sub);
+        user = db.prepare('SELECT * FROM users WHERE id=?').get(info.lastInsertRowid);
+      }
+    }
+    audit(name, 'sso_login_oidc', { iss: 'vva' });
+    const token = crypto.randomBytes(24).toString('hex');
+    tokens.set(token, { userId: user.id, role: user.role, name: user.name });
+    // ส่ง token กลับหน้าเว็บด้วย fragment (ไม่ log) — หน้าเว็บอ่านแล้ว login
+    res.send(`<script>localStorage.setItem('sgt_sso_token', '${token}'); location.href = '/sso-done.html';</script>`);
+  } catch (e) {
+    res.status(500).send('SSO callback error: ' + e.message);
+  }
+});
+
 // ---------- auth ----------
+app.get('/api/me', auth, (req, res) => res.json(req.user));
+
 app.post('/api/login', (req, res) => {
   const { name, pin } = req.body || {};
   const row = db.prepare('SELECT * FROM users WHERE name=? AND pin=?').get(name, pin);
@@ -101,8 +177,9 @@ app.get('/api/settings', (req, res) => {
 app.get('/api/admin/overview', auth, (req, res) => {
   if (!canView(req.user)) return res.status(403).json({ error: 'ต้องเป็น admin' });
   res.json({
-    posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,created_at FROM posts ORDER BY id').all(),
-    checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),
+    sites: db.prepare('SELECT * FROM sites ORDER BY id').all(),
+    posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,site_id,created_at FROM posts ORDER BY id').all(),
+    checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),  // มี site_id ใน select *
     users: db.prepare('SELECT id,name,role FROM users ORDER BY id').all(),
     schedules: db.prepare(
       `SELECT sc.*, u.name guard_name, p.name post_name FROM shift_schedules sc
@@ -116,6 +193,9 @@ app.get('/api/admin/overview', auth, (req, res) => {
     ).all(),
     reports: db.prepare('SELECT * FROM reports ORDER BY id DESC LIMIT 50').all(),
     notif: db.prepare('SELECT * FROM notif_groups ORDER BY id').all(),
+    incidents: db.prepare(
+      `SELECT i.*, u.name guard_name FROM incidents i JOIN users u ON u.id=i.guard_id ORDER BY i.id DESC LIMIT 50`
+    ).all(),
     audit: db.prepare('SELECT * FROM audit_logs ORDER BY id DESC LIMIT 100').all(),
   });
 });
@@ -182,14 +262,25 @@ app.delete('/api/admin/schedules/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- admin: โครงการ (sites) ----------
+app.post('/api/admin/sites', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, address } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'ใส่ชื่อโครงการ' });
+  const info = db.prepare('INSERT INTO sites(name,address,created_at) VALUES(?,?,?)').run(name.trim(), address || '', now());
+  audit(req.user.name, 'site_create', { id: info.lastInsertRowid, name });
+  res.json({ id: info.lastInsertRowid });
+});
+
 // ---------- admin: สร้างป้อม + QR ----------
 app.post('/api/admin/posts', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
-  const { name, lat, lng, radius } = req.body || {};
+  const { name, lat, lng, radius, site_id } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
   const defR = db.prepare("SELECT value FROM settings WHERE key='default_post_radius_m'").get();
-  const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,created_at) VALUES(?,?,?,?,?,?,?)');
-  const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', now());
+  const defSite = db.prepare('SELECT id FROM sites ORDER BY id LIMIT 1').get();
+  const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,site_id,created_at) VALUES(?,?,?,?,?,?,?,?)');
+  const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', site_id || defSite?.id || null, now());
   audit(req.user.name, 'post_create', { id: info.lastInsertRowid, name });
   const qr = await makePostQRWithPng(info.lastInsertRowid, name);
   db.prepare('UPDATE posts SET qr=?, qr_png=? WHERE id=?').run(qr.payload, qr.png, info.lastInsertRowid);
@@ -205,15 +296,27 @@ app.delete('/api/admin/posts/:id', auth, (req, res) => {
 // ---------- admin: จุดตรวจ ----------
 app.post('/api/admin/checkpoints', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
-  const { name, lat, lng, radius, seq } = req.body || {};
+  const { name, lat, lng, radius, seq, site_id } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
   const defR = db.prepare("SELECT value FROM settings WHERE key='default_checkpoint_radius_m'").get();
+  const defSite = db.prepare('SELECT id FROM sites ORDER BY id LIMIT 1').get();
   const count = db.prepare('SELECT COUNT(*) c FROM checkpoints').get().c;
   const code = `CP-${String(count + 1).padStart(2, '0')}`;
-  const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq) VALUES(?,?,?,?,?,?)');
-  const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1);
+  const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq,site_id) VALUES(?,?,?,?,?,?,?)');
+  const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1, site_id || defSite?.id || null);
   audit(req.user.name, 'checkpoint_create', { code, name });
   res.json({ id: info.lastInsertRowid, code });
+});
+
+app.put('/api/admin/checkpoints/:id', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, radius, require_two_person } = req.body || {};
+  const cp = db.prepare('SELECT * FROM checkpoints WHERE id=?').get(req.params.id);
+  if (!cp) return res.status(404).json({ error: 'ไม่พบจุดตรวจ' });
+  db.prepare('UPDATE checkpoints SET name=COALESCE(?,name), radius=COALESCE(?,radius), require_two_person=COALESCE(?,require_two_person) WHERE id=?')
+    .run(name ?? null, radius ?? null, require_two_person != null ? (require_two_person ? 1 : 0) : null, cp.id);
+  audit(req.user.name, 'checkpoint_update', { id: cp.id, code: cp.code });
+  res.json({ ok: true });
 });
 
 app.delete('/api/admin/checkpoints/:id', auth, (req, res) => {
@@ -311,14 +414,24 @@ app.post('/api/guard/checkin', auth, (req, res) => {
       .run(req.user.userId, postId, 'checked_in', now());
     shift = db.prepare('SELECT * FROM shifts WHERE id=?').get(info.lastInsertRowid);
   }
-  const checkpoints = db.prepare('SELECT * FROM checkpoints ORDER BY seq').all();
+  const checkpoints = db.prepare('SELECT * FROM checkpoints WHERE site_id IS NULL OR site_id=? ORDER BY seq').all(post.site_id || 0);
   const today = new Date().toISOString().slice(0, 10);
   const schedule = db.prepare(
     'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
   ).get(req.user.userId, today);
+  // เตือนถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
+  let scheduleWarning = null;
+  if (schedule) {
+    const nowBkk = new Date(Date.now() + 7 * 3600 * 1000);
+    const hm = nowBkk.toISOString().slice(11, 16);
+    const inWindow = schedule.start_time <= schedule.end_time
+      ? (hm >= schedule.start_time && hm <= schedule.end_time)
+      : (hm >= schedule.start_time || hm <= schedule.end_time); // ข้ามเที่ยงคืน
+    if (!inWindow) scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+  }
   audit(req.user.name, 'checkin', { shift: shift.id, post: post.name });
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
-  res.json({ shift, post, checkpoints, schedule });
+  res.json({ shift, post, checkpoints, schedule, scheduleWarning });
 });
 
 // ---------- guard: กดเริ่มปฏิบัติงาน ----------
@@ -351,7 +464,7 @@ function savePosition(shift, lat, lng, accuracy) {
 }
 
 // ---------- guard: ถ่ายรูปเช็คจุดตรวจ + ตรวจ geofence ----------
-app.post('/api/guard/visit', auth, (req, res) => {
+app.post('/api/guard/visit', auth, async (req, res) => {
   const { shiftId, checkpointId, lat, lng, accuracy, photo } = req.body || {};
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
   if (!s || s.status === 'checked_out') return res.status(400).json({ error: 'กะไม่ active' });
@@ -363,22 +476,36 @@ app.post('/api/guard/visit', auth, (req, res) => {
   let photoPath = null;
   if (photo && typeof photo === 'string' && photo.startsWith('data:image')) {
     const buf = Buffer.from(photo.split(',')[1], 'base64');
-    photoPath = `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
-    fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+    photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
+  }
+  // two-person: ถ้าจุดนี้ต้อง 2 คน —เช็คว่ามี รปภ. อีกคนเช็คค้างไว้ใน 30 นาทีหรือไม่
+  let confirmed = 1, paired = false;
+  if (inside && cp.require_two_person) {
+    const other = db.prepare(
+      `SELECT v.* FROM visits v JOIN shifts s2 ON s2.id=v.shift_id
+       WHERE v.checkpoint_id=? AND v.inside=1 AND v.confirmed=0 AND s2.guard_id<>?
+       AND v.ts > datetime('now','-30 minutes') ORDER BY v.id DESC LIMIT 1`
+    ).get(cp.id, req.user.userId);
+    if (other) {
+      paired = true; confirmed = 1;
+      db.prepare('UPDATE visits SET confirmed=1, confirmed_by=? WHERE id=?').run(req.user.userId, other.id);
+    } else {
+      confirmed = 0; // รอคนที่ 2 มายืนยัน
+    }
   }
   const info = db.prepare(
-    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)'
-  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, now());
+    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,confirmed_by,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
+  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, confirmed, paired ? req.user.userId : null, now());
   const visit = db.prepare('SELECT * FROM visits WHERE id=?').get(info.lastInsertRowid);
-  audit(req.user.name, inside ? 'visit_ok' : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist) });
-  broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, dist: Math.round(dist), ts: visit.ts });
+  audit(req.user.name, inside ? (confirmed ? 'visit_ok' : 'visit_pending') : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist), two: !!cp.require_two_person });
+  broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, confirmed, dist: Math.round(dist), ts: visit.ts });
   if (!inside) {
     return res.status(409).json({
       error: `ยังอยู่นอกรัศมีจุดตรวจ (ห่าง ${Math.round(dist)} ม. — ต้องไม่เกิน ${cp.radius} ม.)`,
       dist: Math.round(dist), radius: cp.radius, visitId: visit.id,
     });
   }
-  res.json({ ok: true, visit, dist: Math.round(dist), radius: cp.radius });
+  res.json({ ok: true, confirmed, paired, pending: !confirmed, visit, dist: Math.round(dist), radius: cp.radius });
 });
 
 // ---------- guard: สแกน QR เช็คเอาต์ + สร้างรายงาน ----------
@@ -398,6 +525,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
     `SELECT v.*, c.code, c.name cp_name FROM visits v JOIN checkpoints c ON c.id=v.checkpoint_id
      WHERE v.shift_id=? AND v.inside=1 ORDER BY v.id`
   ).all(s.id);
+  const pendingCount = visits.filter(v => !v.confirmed).length;
   const trackCount = db.prepare('SELECT COUNT(*) c FROM gps_tracks WHERE shift_id=?').get(s.id).c;
   const detail = {
     guard: req.user.name,
@@ -407,6 +535,7 @@ app.post('/api/guard/checkout', auth, async (req, res) => {
     checked_out_at: now(),
     checkpoints_total: total,
     checkpoints_visited: visits.length,
+    pending_two_person: pendingCount,
     gps_points: trackCount,
     visits: visits.map((v) => ({
       code: v.code, name: v.cp_name, ts: v.ts,
@@ -564,6 +693,8 @@ app.get('/api/admin/stats', auth, (req, res) => {
       shifts_today: q("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=date('now')").c,
       reports: q('SELECT COUNT(*) c FROM reports').c,
       sos: q("SELECT COUNT(*) c FROM audit_logs WHERE action='sos'").c,
+      incidents: q('SELECT COUNT(*) c FROM incidents').c,
+      pending_two_person: q('SELECT COUNT(*) c FROM visits WHERE inside=1 AND confirmed=0').c,
       gps_points: q('SELECT COUNT(*) c FROM gps_tracks').c,
     },
     avg_shift_minutes: dur ? Math.round(dur) : null,
@@ -573,7 +704,7 @@ app.get('/api/admin/stats', auth, (req, res) => {
 });
 
 // ---------- guard: ซิงก์ออฟไลน์ (คิวในเครื่อง) ----------
-app.post('/api/guard/sync', auth, (req, res) => {
+app.post('/api/guard/sync', auth, async (req, res) => {
   const { positions = [], visits = [] } = req.body || {};
   const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
   let pOk = 0, vOk = 0, vFail = 0;
@@ -587,15 +718,72 @@ app.post('/api/guard/sync', auth, (req, res) => {
       let photoPath = null;
       if (v.photo && String(v.photo).startsWith('data:image')) {
         const buf = Buffer.from(String(v.photo).split(',')[1], 'base64');
-        photoPath = `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`;
-        fs.writeFileSync(path.join(UPLOAD_DIR, photoPath), buf);
+        photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
       }
-      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,ts) VALUES(?,?,?,?,?,?,?,?)')
-        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, v.ts || now());
+      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,ts) VALUES(?,?,?,?,?,?,?,?,?)')
+        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, 1, v.ts || now());
       if (inside) vOk++; else vFail++;
     }
   }
   res.json({ ok: true, positions: pOk, visits_ok: vOk, visits_outside: vFail });
+});
+
+
+// ---------- รปภ.: แจ้งเหตุการณ์ (ส่งเฉพาะกลุ่มของเหตุการณ์นั้น) ----------
+app.post('/api/guard/incident', auth, async (req, res) => {
+  const { shiftId, type, description, lat, lng, accuracy, photo } = req.body || {};
+  if (!type) return res.status(400).json({ error: 'เลือกประเภทเหตุการณ์' });
+  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
+  let photoPath = null;
+  if (photo && String(photo).startsWith('data:image')) {
+    const buf = Buffer.from(String(photo).split(',')[1], 'base64');
+    photoPath = await savePhoto(UPLOAD_DIR, `inc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
+  }
+  const info = db.prepare(
+    'INSERT INTO incidents(shift_id,guard_id,type,description,lat,lng,accuracy,photo,sent_to,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
+  ).run(s ? s.id : null, req.user.userId, type, description || '', lat ?? null, lng ?? null, accuracy ?? null, photoPath, '', now());
+  const id = info.lastInsertRowid;
+  const text = `🚨 เหตุการณ์: ${type}\nโดย ${req.user.name}${s ? ' (กะ #' + s.id + ')' : ''}\n${description ?? ''}\n${lat != null ? '📍 ' + lat + ', ' + lng + ' — https://www.google.com/maps?q=$lat,$lng\n' : ''}เวลา ${now()}`;
+  // ส่งเฉพาะกลุ่มที่ตั้ง event_type = 'incident' หรือ 'incident:<type>'
+  const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type IN ('incident','incident:'||?)").all(type);
+  const sent = [];
+  for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { incidentId: id, type }));
+  db.prepare('UPDATE incidents SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', id);
+  audit(req.user.name, 'incident', { id, type });
+  broadcast({ type: 'incident', id, guard: req.user.name, incidentType: type, lat, lng, ts: now() });
+  res.json({ ok: true, id, sent_to: sent });
+});
+
+
+// ---------- admin: ส่งออกรายงานเป็น Excel (.xlsx) ----------
+app.get('/api/admin/reports/:id/export.xlsx', auth, (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const r = db.prepare('SELECT * FROM reports WHERE id=?').get(req.params.id);
+  if (!r) return res.status(404).json({ error: 'ไม่พบรายงาน' });
+  const d = JSON.parse(r.detail || '{}');
+  const visits = db.prepare(
+    `SELECT v.*, c.code, c.name cp_name FROM visits v JOIN checkpoints c ON c.id=v.checkpoint_id
+     WHERE v.shift_id=? ORDER BY v.id`).all(r.shift_id);
+  const track = db.prepare('SELECT lat,lng,accuracy,ts FROM gps_tracks WHERE shift_id=? ORDER BY id').all(r.shift_id);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['รายงานกะตรวจ #' + r.id], ['รปภ.', d.guard || r.guard_name], ['ป้อม', d.post || r.post_name],
+    ['เริ่ม', d.started_at || ''], ['จบ', d.ended_at || ''], ['เช็คจุดสำเร็จ', `${d.checkpoints_visited}/${d.checkpoints_total}`],
+    ['จุด GPS', d.gps_points ?? track.length], ['ส่งถึง', r.sent_to || 'inbox'],
+  ]), 'สรุป');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['รหัสจุด', 'ชื่อ', 'เวลา', 'ละติจูด', 'ลองจิจูด', 'ความแม่นยำ (ม.)', 'ในรัศมี', 'รูป'],
+    ...visits.map(v => [v.code, v.cp_name, v.ts, v.lat, v.lng, Math.round(v.accuracy || 0), v.inside ? 'ใช่' : 'ไม่', v.photo || '']),
+  ]), 'จุดตรวจ');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['#', 'เวลา', 'ละติจูด', 'ลองจิจูด', 'ความแม่นยำ (ม.)'],
+    ...track.map((t, i) => [i + 1, t.ts, t.lat, t.lng, Math.round(t.accuracy || 0)]),
+  ]), 'เส้นทาง GPS');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="report_${r.id}.xlsx"`);
+  res.send(buf);
 });
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------

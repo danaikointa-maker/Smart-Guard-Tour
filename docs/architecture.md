@@ -123,12 +123,12 @@ settings(key, value, label)                            ← GPS interval, radii, 
 
 | สถานะ | งาน |
 |---|---|
-| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด, ออฟラインซิงก์, แดชบอร์ดสถิติ+audit log, สลับ tile แผนที่ (Google Maps), **SSO (mock VVA, เปิด/ปิดได้ใน ⚙️)** |
+| ✅ ทำแล้วในต้นแบบ | QRเช็คอิน/เอาต์, GPS+WS สด, รูป+geofence, รายงาน, ตั้งค่าทั้งหมด, ลูกบ้านตามสิทธิ์, SOS, หัวหน้าอ่านอย่างเดียว, แจ้งจุดที่ขาด, ออฟラインซิงก์, แดชบอร์ดสถิติ+audit log, สลับ tile แผนที่ (Google Maps), **SSO (mock VVA, เปิด/ปิดได้ใน ⚙️)**, **แจ้งเหตุการณ์จาก รปภ. (incident → เฉพาะกลุ่มของเหตุการณ์นั้น)**, ฮีตแมปจุดตรวจ, ส่งออกรายงาน CSV/PDF, Docker packaging |
 | 🚧 โครงสร้างพร้อม | **Flutter native app** — โค้ดอยู่ที่ `apps/mobile/` (background_locator + Foreground Service + คิวออฟライン) — เหลือแค่ `flutter pub get && flutter run` |
-| 🚧 ต่อของจริง | SSO VVA — ต้นแบบรองรับแล้ว (`/api/sso/login`, ผูก `vva_user_id`) — โปรดักชันแค่สลับ mock-issue เป็น OAuth2/OIDC จริงของ VVA |
-| 🔲 ต่อไป | PostgreSQL+PostGIS, รูปเข้า S3/MinIO, Google Maps JS API เต็มรูปแบบ (marker แบบ native) |
+| ✅ พร้อมต่อ VVA จริง | SSO แบบ **OAuth2/OIDC เต็มรูปแบบ** (`/api/sso/authorize` → `/api/sso/callback`) — ตั้ง env `VVA_SSO_*` แล้วใช้ได้ทันที; ถ้าไม่ตั้ง env จะ fallback เป็น mock |
+| ✅ พร้อมโปรดักชัน | **PostgreSQL+PostGIS**: สคีมาใน `scripts/migrate-to-postgres.sql` (PostGIS + partition) · **รูปเข้า S3/MinIO**: ตั้ง env `S3_*` แล้ว `server/storage.js` สลับอัตโนมัติ · **Google Maps**: ตั้ง `map_provider=google` + key ใน ⚙️ · **Excel .xlsx**: ปุ่มในรายงาน · **ชุดทดสอบอัตโนมัติ**: `npm test` (14 เคส) · **Multi-site** (ตาราง `sites`, เลือกโครงการใน Admin, จุด/ป้อมแยกตาม site) · **เตือนเช็คอินนอกเวร** · **2-person verification** จุดสำคัญ (admin เปิด flag ต่อจุด → คนแรก pending, คนที่สองมายืนยันภายใน 30 นาที → confirmed จับคู่) |
 
-| 🔲 ต่อไป | ส่งออก PDF/Excel, Heatmap บนแผนที่ (ข้อมูลพร้อมแล้วใน /api/admin/stats) |
+| 🔲 ต่อไป | Excel แบบหลายชีต, แจ้งเตือน push ในแอปมือถือ |
 | 🔲 ต่อไป | แจ้งเตือน push ในแอป, 2-person verification จุดสำคัญ |
 
 ## 8. การรันต้นแบบ (Prototype)

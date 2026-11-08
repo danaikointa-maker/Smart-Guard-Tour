@@ -37,12 +37,18 @@
     </div>
 
     <div id="tab-live">
-      <div class="card"><b>🟢 ตำแหน่ง รปภ. แบบเรียลไทม์</b> <span class="muted">(อัปเดตจาก WebSocket — คลิกกะเพื่อดูเส้นทาง)</span></div>
+      <div class="card"><b>🟢 ตำแหน่ง รปภ. แบบเรียลไทม์</b> <span class="muted">(อัปเดตจาก WebSocket — คลิกกะเพื่อดูเส้นทาง)</span>
+        <button class="btn-sm btn-ghost" style="float:right;" onclick="toggleHeat()">🔥 ฮีตแมปจุดตรวจ</button></div>
       <div id="map-admin"></div>
       <div id="live-list"></div>
     </div>
 
     <div id="tab-manage" class="hidden">
+      <div class="card"><div class="row">
+        <select id="site-select" onchange="onSiteChange()"></select>
+        <input id="site-name" placeholder="ชื่อโครงการใหม่" style="max-width:220px;">
+        <button class="btn-sm btn-ghost" style="max-width:120px;" onclick="addSite()">➕ เพิ่มโครงการ</button>
+      </div></div>
       <div class="row">
         <div class="card">
           <h2>➕ เพิ่มป้อม (คลิกบนแผนที่เพื่อเลือกพิกัด)</h2>
@@ -75,6 +81,8 @@
       <div class="row">
         <div class="card"><h2>🕐 กะล่าสุด</h2><div id="shift-list"></div></div>
         <div class="card" style="flex:2;"><h2>📋 รายงานที่ส่งเข้ามา</h2><div id="report-list"></div></div>
+      </div>
+      <div class="card"><h2>🚨 เหตุการณ์ที่ รปภ. แจ้ง (ล่าสุด)</h2><div id="incident-list"></div></div>
       </div>
     </div>
 
@@ -157,7 +165,12 @@
   <div class="box" style="max-width:640px; max-height:85vh; overflow:auto;">
     <h2 id="mr-title">รายงาน</h2>
     <div id="mr-body"></div>
-    <button class="btn-ghost" style="margin-top:12px; width:100%;" onclick="$('modal-report').classList.add('hidden')">ปิด</button>
+    <div class="row" style="margin-top:12px;">
+      <button class="btn-sm btn-ghost" onclick="exportCsv()">📥 ส่งออก CSV</button>
+      <button class="btn-sm btn-ghost" onclick="if(lastReport) location.href='/api/admin/reports/'+lastReport.id+'/export.xlsx'">📊 ส่งออก Excel</button>
+      <button class="btn-sm btn-ghost" onclick="window.print()">🖨️ พิมพ์ / บันทึก PDF</button>
+      <button class="btn-ghost" style="width:100%;" onclick="$('modal-report').classList.add('hidden')">ปิด</button>
+    </div>
   </div>
 </div>
 

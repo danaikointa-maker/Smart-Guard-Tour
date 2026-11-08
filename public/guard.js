@@ -8,7 +8,7 @@ const show = (id) => { document.querySelectorAll('.container > div').forEach(d =
 const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: null, post: null,
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
   cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null,
-  cfg: { gps_interval_sec: 4 },
+  cfg: { gps_interval_sec: 4 }, pending: new Set(),
   queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]') };
 
 async function api(path, body) {
@@ -65,6 +65,7 @@ async function doCheckin(qr) {
     $('start-post').textContent = j.post.name;
     $('start-info').textContent = `มีจุดตรวจทั้งหมด ${j.checkpoints.length} จุด · กะ #${j.shift.id}` +
       (j.schedule ? ` · เวรของคุณวันนี้ ${j.schedule.start_time}–${j.schedule.end_time} น.` : '');
+    if (j.scheduleWarning) setTimeout(() => toast(j.scheduleWarning), 800);
     show('scr-start');
   } catch (e) { toast(e.message); goScanIn(); }
 }
@@ -158,7 +159,7 @@ function renderCpList() {
     const div = document.createElement('div');
     div.className = 'cp-item' + (isDone ? ' done' : near ? ' near' : ' far');
     div.innerHTML = `<div style="flex:2;"><b>${cp.code}</b> ${cp.name}<br>
-      <span class="muted">รัศมี ${cp.radius} ม. · ${isDone ? '<span class="tag tag-ok">✓ เช็คแล้ว</span>' : ''}</span></div>
+      <span class="muted">รัศมี ${cp.radius} ม. · ${isPending ? '<span class="tag tag-warn">⏳ รอคนที่ 2</span>' : isDone ? '<span class="tag tag-ok">✓ เช็คแล้ว</span>' : ''}</span></div>
       <div class="dist">${d === null ? '…' : d + ' ม.'}</div>
       ${isDone ? '' : `<button class="btn-sm btn-${near ? 'ok' : 'ghost'}" ${near ? '' : 'disabled'}
         onclick="openCamFor(${cp.id})">📷 ${near ? 'ถ่ายรูป' : 'เข้าใกล้ก่อน'}</button>`}`;
@@ -203,7 +204,12 @@ async function sendVisit() {
     const j = await api('/api/guard/visit', { shiftId: S.shift.id, checkpointId: S.shotCp.id,
       lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, photo: S.shotData });
     S.visits.add(S.shotCp.id);
-    closeCam(); renderCpList(); toast(`✅ เช็ค ${S.shotCp.code} สำเร็จ (ห่าง ${j.dist} ม.)`);
+    (S.confirmedSet = S.confirmedSet || new Set());
+    if (j.confirmed) S.confirmedSet.add(S.shotCp.id); else S.confirmedSet.delete(S.shotCp.id);
+    closeCam(); renderCpList();
+    if (j.pending) toast(`⏳ เช็ค ${S.shotCp.code} แล้ว — รอ รปภ. คนที่ 2 มายืนยัน (จุดนี้ต้อง 2 คน)`);
+    else if (j.paired) toast(`✅ เช็ค ${S.shotCp.code} สำเร็จ — จับคู่ยืนยัน 2 คนแล้ว! (ห่าง ${j.dist} ม.)`);
+    else toast(`✅ เช็ค ${S.shotCp.code} สำเร็จ (ห่าง ${j.dist} ม.)`);
     const m = S.cpMarkers[S.shotCp.id]; if (m) { m.setStyle({ color: '#22c55e', fillColor: '#22c55e' }); }
   } catch (e) {
     closeCam();
@@ -242,3 +248,30 @@ async function doCheckout(qr) {
 }
 
 $('lg-name').focus();
+
+// ---------- แจ้งเหตุการณ์ ----------
+let incPhoto = null;
+function openIncident() { incPhoto = null; $('img-inc').classList.add('hidden'); $('inc-desc').value = '';
+  $('modal-incident').classList.remove('hidden'); }
+function closeIncident() { $('modal-incident').classList.add('hidden'); stopIncCam(); }
+function stopIncCam() { const v = $('cam-inc'); if (v.srcObject) { v.srcObject.getTracks().forEach(t => t.stop()); v.srcObject = null; } }
+async function incShoot() {
+  try {
+    const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+    const v = $('cam-inc'); v.srcObject = st; v.classList.remove('hidden'); await v.play();
+    setTimeout(() => {
+      const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      incPhoto = c.toDataURL('image/jpeg', 0.8);
+      $('img-inc').src = incPhoto; $('img-inc').classList.remove('hidden'); v.classList.add('hidden'); stopIncCam();
+    }, 600);
+  } catch (e) { toast('เปิดกล้องไม่ได้: ' + e.message); }
+}
+async function submitIncident() {
+  try {
+    const j = await api('/api/guard/incident', { shiftId: S.shift?.id, type: $('inc-type').value,
+      description: $('inc-desc').value.trim(), lat: S.myPos?.lat, lng: S.myPos?.lng, accuracy: S.myPos?.acc, photo: incPhoto });
+    closeIncident();
+    toast('📢 ส่งแจ้งเหตุการณ์ #' + j.id + ' แล้ว ' + (j.sent_to.length ? '→ ' + j.sent_to.join(', ') : '(เข้ากล่อง Admin)'));
+  } catch (e) { toast(e.message); }
+}

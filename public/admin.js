@@ -72,6 +72,7 @@ function connectWS() {
       }
     }
     else if (m.type === 'missed_cp') toast(`⚠️ กะ #${m.shiftId}: ${m.guard} ยังไม่เช็ค ${m.cp}`);
+    else if (m.type === 'incident') { toast(`🚨 เหตุการณ์ใหม่: ${m.incidentType} โดย ${m.guard}`); loadAll(); }
     else if (m.type === 'visit') toast(`📍 ${m.guard} เช็ค ${m.checkpoint} ${m.inside ? 'สำเร็จ' : '⚠️ นอกรัศมี'}`);
     else if (m.type === 'report') { toast(`📨 รายงานใหม่ #${m.reportId} จาก ${m.guard}`); loadAll(); }
     else if (m.type === 'shift') { loadAll(); }
@@ -127,36 +128,59 @@ function initManageMap() {
 function drawManageMarkers() {
   if (!S.mapManage) return;
   S.mapManage.eachLayer(l => { if (l instanceof L.Marker || l instanceof L.CircleMarker || l instanceof L.Circle) S.mapManage.removeLayer(l); });
-  for (const p of S.data.posts) L.marker([p.lat, p.lng]).addTo(S.mapManage).bindPopup('🚔 ' + p.name);
-  for (const cp of S.data.checkpoints) {
+  const site = curSite();
+  for (const p of S.data.posts.filter(p => !site || !p.site_id || p.site_id === site)) L.marker([p.lat, p.lng]).addTo(S.mapManage).bindPopup('🚔 ' + p.name);
+  for (const cp of S.data.checkpoints.filter(c => !site || !c.site_id || c.site_id === site)) {
     L.circleMarker([cp.lat, cp.lng], { radius: 7, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: .9 }).addTo(S.mapManage).bindPopup(cp.code);
     L.circle([cp.lat, cp.lng], { radius: cp.radius, color: '#38bdf8', weight: 1 }).addTo(S.mapManage);
   }
 }
 async function addPost() {
   try {
-    await api('/api/admin/posts', { name: $('p-name').value.trim(), lat: +$('p-lat').value, lng: +$('p-lng').value, radius: +$('p-radius').value });
+    await api('/api/admin/posts', { name: $('p-name').value.trim(), lat: +$('p-lat').value, lng: +$('p-lng').value, radius: +$('p-radius').value, site_id: curSite() });
     toast('สร้างป้อม + QR สำเร็จ 🎫'); $('p-name').value = ''; await loadAll(); drawManageMarkers();
   } catch (e) { toast(e.message); }
 }
 async function addCheckpoint() {
   try {
-    const j = await api('/api/admin/checkpoints', { name: $('c-name').value.trim(), lat: +$('c-lat').value, lng: +$('c-lng').value, radius: +$('c-radius').value });
+    const j = await api('/api/admin/checkpoints', { name: $('c-name').value.trim(), lat: +$('c-lat').value, lng: +$('c-lng').value, radius: +$('c-radius').value, site_id: curSite() });
     toast('เพิ่มจุด ' + j.code + ' แล้ว'); $('c-name').value = ''; await loadAll(); drawManageMarkers();
   } catch (e) { toast(e.message); }
 }
 async function delPost(id) { if (!confirm('ลบป้อมนี้?')) return; await api(`/api/admin/posts/${id}`, null, 'DELETE'); await loadAll(); drawManageMarkers(); }
 async function delCp(id) { if (!confirm('ลบจุดตรวจนี้?')) return; await api(`/api/admin/checkpoints/${id}`, null, 'DELETE'); await loadAll(); drawManageMarkers(); }
 
+function curSite() { return Number($('site-select')?.value || (S.data.sites[0]?.id) || 0); }
+function onSiteChange() { renderPosts(); renderCpsAdmin(); drawManageMarkers(); }
+function renderSites() {
+  const sel = $('site-select'); if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = S.data.sites.map(s => `<option value="${s.id}">🏢 ${s.name}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+async function addSite() {
+  try { await api('/api/admin/sites', { name: $('site-name').value.trim() }); toast('เพิ่มโครงการแล้ว 🏢'); $('site-name').value = ''; await loadAll(); }
+  catch (e) { toast(e.message); }
+}
 function renderPosts() {
-  $('post-list').innerHTML = S.data.posts.map(p =>
+  const site = curSite();
+  $('post-list').innerHTML = S.data.posts.filter(p => !site || !p.site_id || p.site_id === site).map(p =>
     `<div class="cp-item"><div>🚔 <b>${p.name}</b><br><span class="muted">รัศมี QR ${p.radius} ม.</span></div>
      <button class="btn-sm btn-ghost" onclick="delPost(${p.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีป้อม</p>';
 }
 function renderCpsAdmin() {
-  $('cp-list-admin').innerHTML = S.data.checkpoints.map(c =>
-    `<div class="cp-item"><div><b>${c.code}</b> ${c.name}<br><span class="muted">รัศมี ${c.radius} ม. · ลำดับ ${c.seq}</span></div>
-     <button class="btn-sm btn-ghost" onclick="delCp(${c.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีจุดตรวจ</p>';
+  const site = curSite();
+  $('cp-list-admin').innerHTML = S.data.checkpoints.filter(c => !site || !c.site_id || c.site_id === site).map(c =>
+    `<div class="cp-item"><div><b>${c.code}</b> ${c.name}<br>
+     <span class="muted">รัศมี ${c.radius} ม. · ลำดับ ${c.seq}</span>
+     ${c.require_two_person ? ' <span class="tag tag-warn">👥 ต้อง 2 คนยืนยัน</span>' : ''}</div>
+     <div style="display:flex;gap:6px;">
+       <button class="btn-sm btn-ghost" onclick="toggleTwo(${c.id}, ${c.require_two_person ? 1 : 0})">👥 ${c.require_two_person ? 'ปิด' : 'เปิด'} 2 คน</button>
+       <button class="btn-sm btn-ghost" onclick="delCp(${c.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มีจุดตรวจ</p>';
+}
+async function toggleTwo(id, cur) {
+  try { await api(`/api/admin/checkpoints/${id}`, { require_two_person: !cur }, 'PUT'); toast('อัปเดตจุดตรวจแล้ว'); await loadAll(); }
+  catch (e) { toast(e.message); }
 }
 
 // ---------- QR ----------
@@ -189,6 +213,7 @@ function renderReports() {
 async function openReport(id) {
   try {
     const r = await api(`/api/admin/reports/${id}`);
+    lastReport = r;
     $('mr-title').textContent = `📋 รายงาน #${r.id} — ${r.guard_name} @ ${r.post_name}`;
     const d = r.detail;
     $('mr-body').innerHTML = `
@@ -343,3 +368,46 @@ function renderAudit() {
     initLiveMap(); connectWS();
   } catch (e) { localStorage.removeItem('sgt_admin_token'); localStorage.removeItem('sgt_admin_role'); }
 })();
+
+// ---------- เหตุการณ์ ----------
+function renderIncidents() {
+  const el = $('incident-list'); if (!el || !S.data.incidents) return;
+  el.innerHTML = S.data.incidents.map(i =>
+    `<div class="cp-item"><div>🚨 <b>${i.type}</b> โดย ${i.guard_name}<br>
+     <span class="muted">${i.ts.replace('T',' ').slice(0,19)} · ${i.lat ? '📍 ' + i.lat.toFixed(5) + ',' + i.lng.toFixed(5) : ''} ${i.description || ''}</span><br>
+     <span class="muted">ส่งถึง: ${i.sent_to || 'inbox'}</span></div>
+     ${i.photo ? `<img src="${i.photo.startsWith('http') ? i.photo : '/uploads/' + i.photo}" style="width:90px;border-radius:8px;">` : ''}</div>`).join('')
+    || '<p class="muted">ยังไม่มีเหตุการณ์</p>';
+}
+
+// ---------- ฮีตแมปจุดตรวจบนแผนที่สด ----------
+let heatLayer = null;
+async function toggleHeat() {
+  if (heatLayer) { S.mapLive.removeLayer(heatLayer); heatLayer = null; return; }
+  const s = await api('/api/admin/stats');
+  heatLayer = L.layerGroup();
+  const max = Math.max(1, ...s.checkpoint_stats.map(c => c.visited));
+  for (const c of s.checkpoint_stats) {
+    const cp = S.data.checkpoints.find(x => x.code === c.code);
+    if (!cp) continue;
+    L.circle([cp.lat, cp.lng], { radius: 40 + 260 * (c.visited / max), color: '#ef4444',
+      fillColor: '#ef4444', fillOpacity: 0.15 + 0.35 * (c.visited / max), weight: 1 })
+      .addTo(heatLayer).bindPopup(`${c.code}: ถูกเช็ค ${c.visited} ครั้ง`);
+  }
+  heatLayer.addTo(S.mapLive);
+  toast('🔥 ฮีตแมป: วงสีแดง = ความถี่การเช็คจุดตรวจ');
+}
+
+// ---------- ส่งออกรายงาน ----------
+let lastReport = null;
+async function exportCsv() {
+  if (!lastReport) return;
+  const d = lastReport.detail;
+  const rows = [['code','name','time','lat','lng','accuracy_m'],
+    ...d.visits.map(v => [v.code, v.name, v.ts, v.lat, v.lng, Math.round(v.accuracy || 0)])];
+  const csv = rows.map(r => r.map(x => '"' + String(x).replace(/"/g, '""') + '"').join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
+  a.download = `report_${lastReport.id}.csv`; a.click();
+  toast('📥 ดาวน์โหลด CSV แล้ว');
+}
