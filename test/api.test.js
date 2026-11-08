@@ -192,3 +192,31 @@ test('เช็คอินมี schedule + อาจมี scheduleWarning', a
   assert.ok('schedule' in ci.j);
   assert.ok('scheduleWarning' in ci.j);
 });
+
+test('health checkใช้ได้', async () => {
+  const { status, j } = await api('GET', '/api/health');
+  assert.equal(status, 200); assert.equal(j.ok, true); assert.ok(j.uptime >= 0);
+});
+
+test('openapi.json valid และมี path สำคัญ', async () => {
+  const r = await fetch(BASE + '/api/openapi.json');
+  const j = await r.json();
+  assert.equal(j.openapi, '3.0.3');
+  for (const p of ['/api/login', '/api/guard/checkin', '/api/guard/visit', '/api/guard/checkout', '/ws'])
+    assert.ok(j.paths[p], 'missing ' + p);
+});
+
+test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
+  let last = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = await api('POST', '/api/login', { name: 'x', pin: 'y' });
+    last = r.status;
+  }
+  assert.equal(last, 429);
+});
+
+test('security headers ครบ', async () => {
+  const r = await fetch(BASE + '/api/health');
+  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  assert.ok(r.headers.get('content-security-policy'));
+});

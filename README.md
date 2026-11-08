@@ -32,9 +32,14 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 🛡️ ความปลอดภัย & เอกสาร API
+- Security headers (CSP/X-Frame-Options/nosniff), rate limit หน้า login (10 ครั้ง/5 นาที/IP), health check `GET /api/health`
+- เอกสาร API: หน้า `📖 /docs.html` + สเปก OpenAPI ที่ `/api/openapi.json`
+- 📅 สรุปรายสัปดาห์อัตโนมัติทุกวันจันทร์ 08:00 น. ส่งเข้ากลุ่มแจ้งเตือน
+
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 11 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 18 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

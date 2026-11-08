@@ -13,6 +13,29 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '15mb' }));
+
+// ----------ความปลอดภัยพื้นฐาน ----------
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' https://maps.googleapis.com; connect-src 'self' ws: wss: https:");
+  next();
+});
+
+// rate limit หน้า login (กัน brute-force PIN) — 10 ครั้ง/5 นาที/IP
+const loginHits = new Map();
+app.use('/api/login', (req, res, next) => {
+  const ip = req.ip;
+  const nowT = Date.now();
+  const arr = (loginHits.get(ip) || []).filter(t => nowT - t < 5 * 60 * 1000);
+  if (arr.length >= 10) return res.status(429).json({ error: ' thử nhiềuครั้งเกินไป — ลองใหม่ใน 5 นาที' });
+  arr.push(nowT); loginHits.set(ip, arr);
+  next();
+});
+
+app.get('/api/health', (req, res) => res.json({ ok: true, ts: now(), uptime: process.uptime() }));
+app.get('/api/openapi.json', (req, res) => res.sendFile(path.join(__dirname, '..', 'docs', 'openapi.json')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use('/vendor/leaflet', express.static(path.join(__dirname, '..', 'node_modules', 'leaflet', 'dist')));
 app.use('/vendor/jsqr', express.static(path.join(__dirname, '..', 'node_modules', 'jsqr', 'dist')));
@@ -785,6 +808,26 @@ app.get('/api/admin/reports/:id/export.xlsx', auth, (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="report_${r.id}.xlsx"`);
   res.send(buf);
 });
+
+
+// ---------- สรุปรายสัปดาห์อัตโนมัติ (ทุกจันทร์ 08:00 Bangkok) ----------
+function weeklySummaryTick() {
+  const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+  if (bkk.getUTCDay() !== 1 || bkk.getUTCHours() !== 1) return; // 08:00 BKK = 01:00 UTC
+  const today = bkk.toISOString().slice(0, 10);
+  const lastWeek = db.prepare(
+    `SELECT COUNT(*) shifts, (SELECT COUNT(*) FROM reports) reports,
+            (SELECT COUNT(*) FROM visits WHERE inside=1 AND ts > datetime('now','-7 days')) visits,
+            (SELECT COUNT(*) FROM incidents WHERE ts > datetime('now','-7 days')) incidents,
+            (SELECT COUNT(*) FROM audit_logs WHERE action='sos') sos
+     FROM shifts WHERE checked_in_at > datetime('now','-7 days')`).get();
+  const text = `📅 สรุปรายสัปดาห์ Smart Guard Tour (${today})\n🕐 กะ 7 วัน: ${lastWeek.shifts}\n📍 เช็คจุดสำเร็จ: ${lastWeek.visits} จุด\n🚨 เหตุการณ์: ${lastWeek.incidents} รายการ\n📋 รายงานทั้งหมด: ${lastWeek.reports} ฉบับ`;
+  broadcast({ type: 'weekly', text });
+  db.prepare("SELECT * FROM notif_groups WHERE event_type='shift_report'").all()
+    .forEach(g => sendToGroup(g, text, { weekly: true }));
+  audit('system', 'weekly_summary', { sent: text.length });
+}
+setInterval(weeklySummaryTick, 60 * 60 * 1000); // เช็คทุกชั่วโมงว่าถึงเวลาไหม
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
