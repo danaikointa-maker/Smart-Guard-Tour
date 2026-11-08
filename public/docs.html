@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="th">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API Docs — Smart Guard Tour</title><link rel="stylesheet" href="/common.css"></head>
+<body><div class="container-wide">
+  <h1>📖 Smart Guard Tour — API Docs</h1>
+  <p class="muted">สเปกเต็มอยู่ที่ <a href="/api/openapi.json">/api/openapi.json</a> (OpenAPI 3) · Realtime ผ่าน WebSocket ที่ <code>/ws?token=...</code></p>
+  <div class="card"><h2>🔑 การยืนยันตัวตน</h2>
+    <p>ล็อกอิน <code>POST /api/login</code> {name, pin} → ได้ <code>token</code> ส่งเป็น header <code>x-token</code> ทุก request (จำกัด 10 ครั้ง/5 นาที/IP) หรือผ่าน SSO: <code>GET /api/sso/authorize?name=...</code></p></div>
+  <div class="card"><h2>🚶 โฟลว์ รปภ.</h2>
+    <table>
+      <tr><th>ขั้นตอน</th><th>Endpoint</th></tr>
+      <tr><td>เช็คอิน (สแกน QR)</td><td>POST /api/guard/checkin {qr}</td></tr>
+      <tr><td>เริ่มกะ (เริ่ม GPS)</td><td>POST /api/guard/start {shiftId}</td></tr>
+      <tr><td>ตำแหน่ง (WS หรือ REST)</td><td>WS {type:'pos',...} หรือ POST /api/guard/position</td></tr>
+      <tr><td>ถ่ายรูปเช็คจุด (geofence)</td><td>POST /api/guard/visit {checkpointId, lat, lng, photo}</td></tr>
+      <tr><td>แจ้งเหตุการณ์</td><td>POST /api/guard/incident {type, description, photo}</td></tr>
+      <tr><td>SOS</td><td>POST /api/guard/sos {lat, lng}</td></tr>
+      <tr><td>ออฟไลน์ซิงก์</td><td>POST /api/guard/sync {positions[], visits[]}</td></tr>
+      <tr><td>เช็คเอาต์ (สแกน QR) → รายงาน</td><td>POST /api/guard/checkout {shiftId, qr}</td></tr>
+    </table></div>
+  <div class="card"><h2>🖥️ Admin / 🏠 ลูกบ้าน</h2>
+    <p class="muted">ดูสเปกเต็มใน openapi.json — admin ตั้งค่าทั้งหมดได้ (ป้อม/จุดตรวจ/ผู้ใช้/เวร/ตั้งค่า/กลุ่มแจ้งเตือน/สถิติ), ลูกบ้านอ่าน <code>GET /api/resident/status</code> ตามสิทธิ์ความเป็นส่วนตัว</p></div>
+</div></body></html>

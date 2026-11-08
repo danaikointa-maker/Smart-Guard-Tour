@@ -13,6 +13,29 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: '15mb' }));
+
+// ----------ความปลอดภัยพื้นฐาน ----------
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https:; script-src 'self' https://maps.googleapis.com; connect-src 'self' ws: wss: https:");
+  next();
+});
+
+// rate limit หน้า login (กัน brute-force PIN) — 10 ครั้ง/5 นาที/IP
+const loginHits = new Map();
+app.use('/api/login', (req, res, next) => {
+  const ip = req.ip;
+  const nowT = Date.now();
+  const arr = (loginHits.get(ip) || []).filter(t => nowT - t < 5 * 60 * 1000);
+  if (arr.length >= 10) return res.status(429).json({ error: ' thử nhiềuครั้งเกินไป — ลองใหม่ใน 5 นาที' });
+  arr.push(nowT); loginHits.set(ip, arr);
+  next();
+});
+
+app.get('/api/health', (req, res) => res.json({ ok: true, ts: now(), uptime: process.uptime() }));
+app.get('/api/openapi.json', (req, res) => res.sendFile(path.join(__dirname, '..', 'docs', 'openapi.json')));
 app.use(express.static(path.join(__dirname, '..', 'public')));
 app.use('/vendor/leaflet', express.static(path.join(__dirname, '..', 'node_modules', 'leaflet', 'dist')));
 app.use('/vendor/jsqr', express.static(path.join(__dirname, '..', 'node_modules', 'jsqr', 'dist')));
@@ -419,7 +442,7 @@ app.post('/api/guard/checkin', auth, (req, res) => {
   const schedule = db.prepare(
     'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
   ).get(req.user.userId, today);
-  // เตือนถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
+  // เตือน/บังคับ ถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
   let scheduleWarning = null;
   if (schedule) {
     const nowBkk = new Date(Date.now() + 7 * 3600 * 1000);
@@ -427,7 +450,14 @@ app.post('/api/guard/checkin', auth, (req, res) => {
     const inWindow = schedule.start_time <= schedule.end_time
       ? (hm >= schedule.start_time && hm <= schedule.end_time)
       : (hm >= schedule.start_time || hm <= schedule.end_time); // ข้ามเที่ยงคืน
-    if (!inWindow) scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+    if (!inWindow) {
+      scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+      const enforce = db.prepare("SELECT value FROM settings WHERE key='enforce_schedule'").get();
+      if (enforce && enforce.value === 'true') {
+        audit(req.user.name, 'checkin_blocked_out_of_schedule', { hm, schedule: schedule.id });
+        return res.status(403).json({ error: scheduleWarning + ' — ระบบตั้งค่าให้บังคับเช็คอินในเวรเท่านั้น' });
+      }
+    }
   }
   audit(req.user.name, 'checkin', { shift: shift.id, post: post.name });
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
@@ -783,6 +813,101 @@ app.get('/api/admin/reports/:id/export.xlsx', auth, (req, res) => {
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="report_${r.id}.xlsx"`);
+  res.send(buf);
+});
+
+
+// ---------- สรุปรายสัปดาห์อัตโนมัติ (ทุกจันทร์ 08:00 Bangkok) ----------
+function weeklySummaryTick() {
+  const bkk = new Date(Date.now() + 7 * 3600 * 1000);
+  if (bkk.getUTCDay() !== 1 || bkk.getUTCHours() !== 1) return; // 08:00 BKK = 01:00 UTC
+  const today = bkk.toISOString().slice(0, 10);
+  const lastWeek = db.prepare(
+    `SELECT COUNT(*) shifts, (SELECT COUNT(*) FROM reports) reports,
+            (SELECT COUNT(*) FROM visits WHERE inside=1 AND ts > datetime('now','-7 days')) visits,
+            (SELECT COUNT(*) FROM incidents WHERE ts > datetime('now','-7 days')) incidents,
+            (SELECT COUNT(*) FROM audit_logs WHERE action='sos') sos
+     FROM shifts WHERE checked_in_at > datetime('now','-7 days')`).get();
+  const text = `📅 สรุปรายสัปดาห์ Smart Guard Tour (${today})\n🕐 กะ 7 วัน: ${lastWeek.shifts}\n📍 เช็คจุดสำเร็จ: ${lastWeek.visits} จุด\n🚨 เหตุการณ์: ${lastWeek.incidents} รายการ\n📋 รายงานทั้งหมด: ${lastWeek.reports} ฉบับ`;
+  broadcast({ type: 'weekly', text });
+  db.prepare("SELECT * FROM notif_groups WHERE event_type='shift_report'").all()
+    .forEach(g => sendToGroup(g, text, { weekly: true }));
+  audit('system', 'weekly_summary', { sent: text.length });
+}
+setInterval(weeklySummaryTick, 60 * 60 * 1000); // เช็คทุกชั่วโมงว่าถึงเวลาไหม
+
+
+// ---------- admin: ปิดเหตุการณ์ (resolved) ----------
+app.post('/api/admin/incidents/:id/resolve', auth, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'supervisor') return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const info = db.prepare("UPDATE incidents SET status='resolved', resolved_by=? WHERE id=?").run(req.user.name, req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'ไม่พบเหตุการณ์' });
+  audit(req.user.name, 'incident_resolve', { id: req.params.id });
+  broadcast({ type: 'incident_resolved', id: Number(req.params.id), by: req.user.name });
+  res.json({ ok: true });
+});
+
+// ---------- ลบข้อมูล GPS เก่าตาม retention (PDPA) ----------
+function cleanupOldGps() {
+  const r = db.prepare("SELECT value FROM settings WHERE key='gps_retention_days'").get();
+  const days = Math.max(1, parseInt(r?.value || '90', 10));
+  const del = db.prepare("DELETE FROM gps_tracks WHERE ts < datetime('now', ?)").run(`-${days} days`);
+  if (del.changes > 0) audit('system', 'retention_cleanup', { deleted_gps: del.changes, days });
+  return del.changes;
+}
+app.post('/api/admin/cleanup', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  res.json({ ok: true, deleted_gps: cleanupOldGps() });
+});
+setInterval(() => { try { cleanupOldGps(); } catch (e) { console.error('[cleanup]', e.message); } }, 24 * 60 * 60 * 1000);
+
+
+// ---------- admin: สำรอง/กู้คืนข้อมูล (JSON dump ทุกตาราง) ----------
+const TABLES = ['users','sites','posts','checkpoints','shifts','gps_tracks','visits','incidents','reports','notif_groups','settings','shift_schedules','audit_logs'];
+app.get('/api/admin/backup', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const out = { exported_at: now(), tables: {} };
+  for (const t of TABLES) out.tables[t] = db.prepare(`SELECT * FROM ${t}`).all();
+  audit(req.user.name, 'backup', { tables: TABLES.length });
+  res.setHeader('Content-Disposition', `attachment; filename="sgt-backup-${Date.now()}.json"`);
+  res.json(out);
+});
+app.post('/api/admin/restore', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const data = req.body || {};
+  if (!data.tables) return res.status(400).json({ error: 'ไฟล์สำรองไม่ถูกต้อง' });
+  for (const t of TABLES) {
+    if (!data.tables[t]) continue;
+    db.prepare(`DELETE FROM ${t}`).run();
+    const rows = data.tables[t];
+    if (!rows.length) continue;
+    const cols = Object.keys(rows[0]);
+    const ins = db.prepare(`INSERT INTO ${t}(${cols.join(',')}) VALUES(${cols.map(() => '?').join(',')})`);
+    for (const row of rows) ins.run(...cols.map(c => row[c]));
+  }
+  audit(req.user.name, 'restore', { tables: Object.keys(data.tables).length });
+  res.json({ ok: true });
+});
+
+// ---------- admin: ส่งออกสถิติเป็น Excel ----------
+app.get('/api/admin/stats/export.xlsx', auth, async (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const s = db.prepare('SELECT 1').get(); // reuse stats logic inline
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    days.push([d, db.prepare("SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=?").get(d).c,
+      db.prepare("SELECT COUNT(*) c FROM visits WHERE inside=1 AND substr(ts,1,10)=?").get(d).c]);
+  }
+  const cpStats = db.prepare(
+    `SELECT c.code, c.name, COUNT(v.id) visited FROM checkpoints c
+     LEFT JOIN visits v ON v.checkpoint_id=c.id AND v.inside=1 GROUP BY c.id ORDER BY c.seq`).all();
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['วันที่', 'จำนวนกะ', 'เช็คจุดสำเร็จ'], ...days]), '7 วันย้อนหลัง');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['รหัสจุด', 'ชื่อ', 'ครั้งที่ถูกเช็ค'], ...cpStats.map(c => [c.code, c.name, c.visited])]), 'จุดตรวจ');
+  const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="stats_${Date.now()}.xlsx"`);
   res.send(buf);
 });
 

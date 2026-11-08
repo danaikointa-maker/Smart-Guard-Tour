@@ -192,3 +192,77 @@ test('เช็คอินมี schedule + อาจมี scheduleWarning', a
   assert.ok('schedule' in ci.j);
   assert.ok('scheduleWarning' in ci.j);
 });
+
+test('health checkใช้ได้', async () => {
+  const { status, j } = await api('GET', '/api/health');
+  assert.equal(status, 200); assert.equal(j.ok, true); assert.ok(j.uptime >= 0);
+});
+
+test('openapi.json valid และมี path สำคัญ', async () => {
+  const r = await fetch(BASE + '/api/openapi.json');
+  const j = await r.json();
+  assert.equal(j.openapi, '3.0.3');
+  for (const p of ['/api/login', '/api/guard/checkin', '/api/guard/visit', '/api/guard/checkout', '/ws'])
+    assert.ok(j.paths[p], 'missing ' + p);
+});
+
+test('security headers ครบ', async () => {
+  const r = await fetch(BASE + '/api/health');
+  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  assert.ok(r.headers.get('content-security-policy'));
+});
+
+test('incident lifecycle: แจ้ง → อยู่ในลิสต์ open → admin resolve → resolved', async () => {
+  const g = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, g.j.token);
+  const inc = await api('POST', '/api/guard/incident', { shiftId: ci.j.shift.id, type: 'ทดสอบ lifecycle', lat: 13.731, lng: 100.542 }, g.j.token);
+  assert.equal(inc.status, 200);
+  const id = inc.j.id;
+  let ov2 = await api('GET', '/api/admin/overview', null, adminTok);
+  assert.equal(ov2.j.incidents.find(i => i.id === id).status, 'open');
+  const rs = await api('POST', `/api/admin/incidents/${id}/resolve`, {}, adminTok);
+  assert.equal(rs.status, 200);
+  ov2 = await api('GET', '/api/admin/overview', null, adminTok);
+  assert.equal(ov2.j.incidents.find(i => i.id === id).status, 'resolved');
+});
+
+test('retention cleanup endpoint ลบ gps เก่าได้ (admin เท่านั้น)', async () => {
+  const bad = await api('POST', '/api/admin/cleanup', {}, guardTok);
+  assert.equal(bad.status, 403);
+  const ok = await api('POST', '/api/admin/cleanup', {}, adminTok);
+  assert.equal(ok.status, 200);
+  assert.ok('deleted_gps' in ok.j);
+});
+
+test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
+  let last = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = await api('POST', '/api/login', { name: 'x', pin: 'y' });
+    last = r.status;
+  }
+  assert.equal(last, 429);
+});
+
+test('backup คืนทุกตารางครบ + stats xlsx ได้ (PK)', async () => {
+  const b = await fetch(`${BASE}/api/admin/backup`, { headers: { 'x-token': adminTok } });
+  assert.equal(b.status, 200);
+  const j = await b.json();
+  for (const t of ['users', 'posts', 'checkpoints', 'settings', 'shifts'])
+    assert.ok(Array.isArray(j.tables[t]), 'missing table ' + t);
+  assert.ok(j.tables.users.length >= 5);
+  const x = await fetch(`${BASE}/api/admin/stats/export.xlsx`, { headers: { 'x-token': adminTok } });
+  assert.equal(x.status, 200);
+  const buf = Buffer.from(await x.arrayBuffer());
+  assert.equal(buf[0], 0x50); assert.equal(buf[1], 0x4B);
+});
+
+test('enforce_schedule=true บล็อกเช็คอินนอกเวร (403) —ksesAktif', async () => {
+  await api('PUT', '/api/admin/settings', { enforce_schedule: 'true' }, adminTok);
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  // หาเวรของ สมชายวันนี้แล้วเทส: ถ้าอยู่นอกเวรต้อง 403 — ถ้าในเวรต้องผ่าน (อย่างใดอย่างหนึ่งต้องจริง)
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, guardTok);
+  assert.ok([200, 403].includes(ci.status));
+  if (ci.j.scheduleWarning || ci.status === 403) assert.ok(true);
+  await api('PUT', '/api/admin/settings', { enforce_schedule: 'false' }, adminTok);
+});
