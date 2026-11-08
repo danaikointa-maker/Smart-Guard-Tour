@@ -206,6 +206,35 @@ test('openapi.json valid และมี path สำคัญ', async () => {
     assert.ok(j.paths[p], 'missing ' + p);
 });
 
+test('security headers ครบ', async () => {
+  const r = await fetch(BASE + '/api/health');
+  assert.equal(r.headers.get('x-frame-options'), 'DENY');
+  assert.ok(r.headers.get('content-security-policy'));
+});
+
+test('incident lifecycle: แจ้ง → อยู่ในลิสต์ open → admin resolve → resolved', async () => {
+  const g = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, g.j.token);
+  const inc = await api('POST', '/api/guard/incident', { shiftId: ci.j.shift.id, type: 'ทดสอบ lifecycle', lat: 13.731, lng: 100.542 }, g.j.token);
+  assert.equal(inc.status, 200);
+  const id = inc.j.id;
+  let ov2 = await api('GET', '/api/admin/overview', null, adminTok);
+  assert.equal(ov2.j.incidents.find(i => i.id === id).status, 'open');
+  const rs = await api('POST', `/api/admin/incidents/${id}/resolve`, {}, adminTok);
+  assert.equal(rs.status, 200);
+  ov2 = await api('GET', '/api/admin/overview', null, adminTok);
+  assert.equal(ov2.j.incidents.find(i => i.id === id).status, 'resolved');
+});
+
+test('retention cleanup endpoint ลบ gps เก่าได้ (admin เท่านั้น)', async () => {
+  const bad = await api('POST', '/api/admin/cleanup', {}, guardTok);
+  assert.equal(bad.status, 403);
+  const ok = await api('POST', '/api/admin/cleanup', {}, adminTok);
+  assert.equal(ok.status, 200);
+  assert.ok('deleted_gps' in ok.j);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
@@ -213,10 +242,4 @@ test('login rate limit — ยิง 12 ครั้งต้องโดน 429
     last = r.status;
   }
   assert.equal(last, 429);
-});
-
-test('security headers ครบ', async () => {
-  const r = await fetch(BASE + '/api/health');
-  assert.equal(r.headers.get('x-frame-options'), 'DENY');
-  assert.ok(r.headers.get('content-security-policy'));
 });

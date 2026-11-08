@@ -829,6 +829,31 @@ function weeklySummaryTick() {
 }
 setInterval(weeklySummaryTick, 60 * 60 * 1000); // เช็คทุกชั่วโมงว่าถึงเวลาไหม
 
+
+// ---------- admin: ปิดเหตุการณ์ (resolved) ----------
+app.post('/api/admin/incidents/:id/resolve', auth, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'supervisor') return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const info = db.prepare("UPDATE incidents SET status='resolved', resolved_by=? WHERE id=?").run(req.user.name, req.params.id);
+  if (info.changes === 0) return res.status(404).json({ error: 'ไม่พบเหตุการณ์' });
+  audit(req.user.name, 'incident_resolve', { id: req.params.id });
+  broadcast({ type: 'incident_resolved', id: Number(req.params.id), by: req.user.name });
+  res.json({ ok: true });
+});
+
+// ---------- ลบข้อมูล GPS เก่าตาม retention (PDPA) ----------
+function cleanupOldGps() {
+  const r = db.prepare("SELECT value FROM settings WHERE key='gps_retention_days'").get();
+  const days = Math.max(1, parseInt(r?.value || '90', 10));
+  const del = db.prepare("DELETE FROM gps_tracks WHERE ts < datetime('now', ?)").run(`-${days} days`);
+  if (del.changes > 0) audit('system', 'retention_cleanup', { deleted_gps: del.changes, days });
+  return del.changes;
+}
+app.post('/api/admin/cleanup', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  res.json({ ok: true, deleted_gps: cleanupOldGps() });
+});
+setInterval(() => { try { cleanupOldGps(); } catch (e) { console.error('[cleanup]', e.message); } }, 24 * 60 * 60 * 1000);
+
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Smart Guard Tour running: http://0.0.0.0:${PORT}`);

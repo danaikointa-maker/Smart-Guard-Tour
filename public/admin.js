@@ -73,6 +73,7 @@ function connectWS() {
     }
     else if (m.type === 'missed_cp') toast(`⚠️ กะ #${m.shiftId}: ${m.guard} ยังไม่เช็ค ${m.cp}`);
     else if (m.type === 'incident') { toast(`🚨 เหตุการณ์ใหม่: ${m.incidentType} โดย ${m.guard}`); loadAll(); }
+    else if (m.type === 'incident_resolved') { toast(`✅ เหตุการณ์ #${m.id} แก้แล้วโดย ${m.by}`); loadAll(); }
     else if (m.type === 'visit') toast(`📍 ${m.guard} เช็ค ${m.checkpoint} ${m.inside ? 'สำเร็จ' : '⚠️ นอกรัศมี'}`);
     else if (m.type === 'report') { toast(`📨 รายงานใหม่ #${m.reportId} จาก ${m.guard}`); loadAll(); }
     else if (m.type === 'shift') { loadAll(); }
@@ -376,6 +377,9 @@ function renderIncidents() {
     `<div class="cp-item"><div>🚨 <b>${i.type}</b> โดย ${i.guard_name}<br>
      <span class="muted">${i.ts.replace('T',' ').slice(0,19)} · ${i.lat ? '📍 ' + i.lat.toFixed(5) + ',' + i.lng.toFixed(5) : ''} ${i.description || ''}</span><br>
      <span class="muted">ส่งถึง: ${i.sent_to || 'inbox'}</span></div>
+     ${i.status === 'resolved'
+       ? `<span class="tag tag-ok">✓ แก้แล้ว${i.resolved_by ? ' โดย ' + i.resolved_by : ''}</span>`
+       : `<button class="btn-sm btn-ghost" onclick="resolveIncident(${i.id})">✔ ทำเครื่องหมายแก้แล้ว</button>`}</div>
      ${i.photo ? `<img src="${i.photo.startsWith('http') ? i.photo : '/uploads/' + i.photo}" style="width:90px;border-radius:8px;">` : ''}</div>`).join('')
     || '<p class="muted">ยังไม่มีเหตุการณ์</p>';
 }
@@ -410,4 +414,9 @@ async function exportCsv() {
   a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' }));
   a.download = `report_${lastReport.id}.csv`; a.click();
   toast('📥 ดาวน์โหลด CSV แล้ว');
+}
+
+async function resolveIncident(id) {
+  try { await api(`/api/admin/incidents/${id}/resolve`, {}); toast('บันทึกว่าแก้แล้ว ✅'); await loadAll(); }
+  catch (e) { toast(e.message); }
 }
