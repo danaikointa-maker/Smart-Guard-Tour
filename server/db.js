@@ -91,6 +91,12 @@ CREATE TABLE IF NOT EXISTS incidents(
   sent_to TEXT,
   ts TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS sites(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  address TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_logs(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,
@@ -119,6 +125,8 @@ addCol('users', 'vva_user_id', "TEXT");
 addCol('checkpoints', 'require_two_person', 'INTEGER NOT NULL DEFAULT 0');
 addCol('visits', 'confirmed', 'INTEGER NOT NULL DEFAULT 1');
 addCol('visits', 'confirmed_by', 'INTEGER');
+addCol('posts', 'site_id', 'INTEGER');
+addCol('checkpoints', 'site_id', 'INTEGER');
 
 const now = () => new Date().toISOString();
 const BASE = { lat: 13.7307, lng: 100.5418 }; // ลุมพินี (เดโม่)
@@ -152,6 +160,18 @@ if (userCount === 0) {
   insSch.run(2, 1, today, '06:00', '14:00');
   insSch.run(3, 1, today, '14:00', '22:00');
   console.log('[db] seeded demo data (admin/admin123 · สมชาย/1234 · วันดี/1234 · วินัย/1234 หัวหน้า · ลูกบ้าน A/1234)');
+}
+
+// ---- seed โครงการเดโม่ + ผูกข้อมูลเดิม (idempotent) ----
+{
+  const c = db.prepare('SELECT COUNT(*) c FROM sites').get().c;
+  if (c === 0) db.prepare('INSERT INTO sites(name,address,created_at) VALUES(?,?,?)')
+    .run('โครงการลุมพินี (เดโม่)', 'สวนลุมพินี กรุงเทพฯ', now());
+  const s = db.prepare('SELECT id FROM sites ORDER BY id LIMIT 1').get();
+  if (s) {
+    db.prepare('UPDATE posts SET site_id=? WHERE site_id IS NULL').run(s.id);
+    db.prepare('UPDATE checkpoints SET site_id=? WHERE site_id IS NULL').run(s.id);
+  }
 }
 
 // ---- seed บัญชีเดโม่เพิ่ม (idempotent) ----

@@ -128,34 +128,49 @@ function initManageMap() {
 function drawManageMarkers() {
   if (!S.mapManage) return;
   S.mapManage.eachLayer(l => { if (l instanceof L.Marker || l instanceof L.CircleMarker || l instanceof L.Circle) S.mapManage.removeLayer(l); });
-  for (const p of S.data.posts) L.marker([p.lat, p.lng]).addTo(S.mapManage).bindPopup('🚔 ' + p.name);
-  for (const cp of S.data.checkpoints) {
+  const site = curSite();
+  for (const p of S.data.posts.filter(p => !site || !p.site_id || p.site_id === site)) L.marker([p.lat, p.lng]).addTo(S.mapManage).bindPopup('🚔 ' + p.name);
+  for (const cp of S.data.checkpoints.filter(c => !site || !c.site_id || c.site_id === site)) {
     L.circleMarker([cp.lat, cp.lng], { radius: 7, color: '#f59e0b', fillColor: '#f59e0b', fillOpacity: .9 }).addTo(S.mapManage).bindPopup(cp.code);
     L.circle([cp.lat, cp.lng], { radius: cp.radius, color: '#38bdf8', weight: 1 }).addTo(S.mapManage);
   }
 }
 async function addPost() {
   try {
-    await api('/api/admin/posts', { name: $('p-name').value.trim(), lat: +$('p-lat').value, lng: +$('p-lng').value, radius: +$('p-radius').value });
+    await api('/api/admin/posts', { name: $('p-name').value.trim(), lat: +$('p-lat').value, lng: +$('p-lng').value, radius: +$('p-radius').value, site_id: curSite() });
     toast('สร้างป้อม + QR สำเร็จ 🎫'); $('p-name').value = ''; await loadAll(); drawManageMarkers();
   } catch (e) { toast(e.message); }
 }
 async function addCheckpoint() {
   try {
-    const j = await api('/api/admin/checkpoints', { name: $('c-name').value.trim(), lat: +$('c-lat').value, lng: +$('c-lng').value, radius: +$('c-radius').value });
+    const j = await api('/api/admin/checkpoints', { name: $('c-name').value.trim(), lat: +$('c-lat').value, lng: +$('c-lng').value, radius: +$('c-radius').value, site_id: curSite() });
     toast('เพิ่มจุด ' + j.code + ' แล้ว'); $('c-name').value = ''; await loadAll(); drawManageMarkers();
   } catch (e) { toast(e.message); }
 }
 async function delPost(id) { if (!confirm('ลบป้อมนี้?')) return; await api(`/api/admin/posts/${id}`, null, 'DELETE'); await loadAll(); drawManageMarkers(); }
 async function delCp(id) { if (!confirm('ลบจุดตรวจนี้?')) return; await api(`/api/admin/checkpoints/${id}`, null, 'DELETE'); await loadAll(); drawManageMarkers(); }
 
+function curSite() { return Number($('site-select')?.value || (S.data.sites[0]?.id) || 0); }
+function onSiteChange() { renderPosts(); renderCpsAdmin(); drawManageMarkers(); }
+function renderSites() {
+  const sel = $('site-select'); if (!sel) return;
+  const cur = sel.value;
+  sel.innerHTML = S.data.sites.map(s => `<option value="${s.id}">🏢 ${s.name}</option>`).join('');
+  if (cur) sel.value = cur;
+}
+async function addSite() {
+  try { await api('/api/admin/sites', { name: $('site-name').value.trim() }); toast('เพิ่มโครงการแล้ว 🏢'); $('site-name').value = ''; await loadAll(); }
+  catch (e) { toast(e.message); }
+}
 function renderPosts() {
-  $('post-list').innerHTML = S.data.posts.map(p =>
+  const site = curSite();
+  $('post-list').innerHTML = S.data.posts.filter(p => !site || !p.site_id || p.site_id === site).map(p =>
     `<div class="cp-item"><div>🚔 <b>${p.name}</b><br><span class="muted">รัศมี QR ${p.radius} ม.</span></div>
      <button class="btn-sm btn-ghost" onclick="delPost(${p.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีป้อม</p>';
 }
 function renderCpsAdmin() {
-  $('cp-list-admin').innerHTML = S.data.checkpoints.map(c =>
+  const site = curSite();
+  $('cp-list-admin').innerHTML = S.data.checkpoints.filter(c => !site || !c.site_id || c.site_id === site).map(c =>
     `<div class="cp-item"><div><b>${c.code}</b> ${c.name}<br>
      <span class="muted">รัศมี ${c.radius} ม. · ลำดับ ${c.seq}</span>
      ${c.require_two_person ? ' <span class="tag tag-warn">👥 ต้อง 2 คนยืนยัน</span>' : ''}</div>

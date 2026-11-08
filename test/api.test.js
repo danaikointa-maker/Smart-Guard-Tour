@@ -169,3 +169,26 @@ test('two-person verification: จุดต้อง 2 คน — คนแร�
   // ปิด flag คืน
   await api('PUT', `/api/admin/checkpoints/${cp0.id}`, { require_two_person: false }, adminTok);
 });
+
+test('multi-site: สร้างโครงการใหม่ + ป้อม/จุดใหม่ผูก site นั้น, checkin ได้เฉพาะจุดของ site', async () => {
+  const s = await api('POST', '/api/admin/sites', { name: 'โครงการทดสอบ B', address: '...' }, adminTok);
+  assert.equal(s.status, 200);
+  const siteId = s.j.id;
+  const p = await api('POST', '/api/admin/posts', { name: 'ป้อม B', lat: 13.74, lng: 100.55, radius: 30, site_id: siteId }, adminTok);
+  assert.equal(p.status, 200);
+  const c = await api('POST', '/api/admin/checkpoints', { name: 'จุด B1', lat: 13.7401, lng: 100.5501, radius: 100, site_id: siteId }, adminTok);
+  assert.equal(c.status, 200);
+  //เช็คอินที่ป้อม B → ได้เฉพาะจุดของ site B
+  const ci = await api('POST', '/api/guard/checkin', { qr: p.j.qr }, guardTok);
+  assert.equal(ci.status, 200);
+  assert.ok(ci.j.checkpoints.every(x => x.site_id === siteId));
+  assert.ok(ci.j.post.site_id === siteId);
+});
+
+test('เช็คอินมี schedule + อาจมี scheduleWarning', async () => {
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, guardTok);
+  assert.equal(ci.status, 200);
+  assert.ok('schedule' in ci.j);
+  assert.ok('scheduleWarning' in ci.j);
+});

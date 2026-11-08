@@ -44,6 +44,11 @@
     </div>
 
     <div id="tab-manage" class="hidden">
+      <div class="card"><div class="row">
+        <select id="site-select" onchange="onSiteChange()"></select>
+        <input id="site-name" placeholder="ชื่อโครงการใหม่" style="max-width:220px;">
+        <button class="btn-sm btn-ghost" style="max-width:120px;" onclick="addSite()">➕ เพิ่มโครงการ</button>
+      </div></div>
       <div class="row">
         <div class="card">
           <h2>➕ เพิ่มป้อม (คลิกบนแผนที่เพื่อเลือกพิกัด)</h2>

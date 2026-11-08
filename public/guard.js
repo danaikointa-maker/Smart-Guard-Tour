@@ -65,6 +65,7 @@ async function doCheckin(qr) {
     $('start-post').textContent = j.post.name;
     $('start-info').textContent = `มีจุดตรวจทั้งหมด ${j.checkpoints.length} จุด · กะ #${j.shift.id}` +
       (j.schedule ? ` · เวรของคุณวันนี้ ${j.schedule.start_time}–${j.schedule.end_time} น.` : '');
+    if (j.scheduleWarning) setTimeout(() => toast(j.scheduleWarning), 800);
     show('scr-start');
   } catch (e) { toast(e.message); goScanIn(); }
 }

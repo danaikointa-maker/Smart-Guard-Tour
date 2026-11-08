@@ -177,8 +177,9 @@ app.get('/api/settings', (req, res) => {
 app.get('/api/admin/overview', auth, (req, res) => {
   if (!canView(req.user)) return res.status(403).json({ error: 'ต้องเป็น admin' });
   res.json({
-    posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,created_at FROM posts ORDER BY id').all(),
-    checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),
+    sites: db.prepare('SELECT * FROM sites ORDER BY id').all(),
+    posts: db.prepare('SELECT id,name,lat,lng,radius,qr,qr_png,site_id,created_at FROM posts ORDER BY id').all(),
+    checkpoints: db.prepare('SELECT * FROM checkpoints ORDER BY seq').all(),  // มี site_id ใน select *
     users: db.prepare('SELECT id,name,role FROM users ORDER BY id').all(),
     schedules: db.prepare(
       `SELECT sc.*, u.name guard_name, p.name post_name FROM shift_schedules sc
@@ -261,14 +262,25 @@ app.delete('/api/admin/schedules/:id', auth, (req, res) => {
   res.json({ ok: true });
 });
 
+// ---------- admin: โครงการ (sites) ----------
+app.post('/api/admin/sites', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const { name, address } = req.body || {};
+  if (!name) return res.status(400).json({ error: 'ใส่ชื่อโครงการ' });
+  const info = db.prepare('INSERT INTO sites(name,address,created_at) VALUES(?,?,?)').run(name.trim(), address || '', now());
+  audit(req.user.name, 'site_create', { id: info.lastInsertRowid, name });
+  res.json({ id: info.lastInsertRowid });
+});
+
 // ---------- admin: สร้างป้อม + QR ----------
 app.post('/api/admin/posts', auth, async (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
-  const { name, lat, lng, radius } = req.body || {};
+  const { name, lat, lng, radius, site_id } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
   const defR = db.prepare("SELECT value FROM settings WHERE key='default_post_radius_m'").get();
-  const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,created_at) VALUES(?,?,?,?,?,?,?)');
-  const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', now());
+  const defSite = db.prepare('SELECT id FROM sites ORDER BY id LIMIT 1').get();
+  const ins = db.prepare('INSERT INTO posts(name,lat,lng,radius,qr,qr_png,site_id,created_at) VALUES(?,?,?,?,?,?,?,?)');
+  const info = ins.run(name, lat, lng, Number(radius) || Number(defR?.value || 30), 'temp', 'temp', site_id || defSite?.id || null, now());
   audit(req.user.name, 'post_create', { id: info.lastInsertRowid, name });
   const qr = await makePostQRWithPng(info.lastInsertRowid, name);
   db.prepare('UPDATE posts SET qr=?, qr_png=? WHERE id=?').run(qr.payload, qr.png, info.lastInsertRowid);
@@ -284,13 +296,14 @@ app.delete('/api/admin/posts/:id', auth, (req, res) => {
 // ---------- admin: จุดตรวจ ----------
 app.post('/api/admin/checkpoints', auth, (req, res) => {
   if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
-  const { name, lat, lng, radius, seq } = req.body || {};
+  const { name, lat, lng, radius, seq, site_id } = req.body || {};
   if (!name || !isFinite(lat) || !isFinite(lng)) return res.status(400).json({ error: 'กรอกชื่อและเลือกพิกัดบนแผนที่' });
   const defR = db.prepare("SELECT value FROM settings WHERE key='default_checkpoint_radius_m'").get();
+  const defSite = db.prepare('SELECT id FROM sites ORDER BY id LIMIT 1').get();
   const count = db.prepare('SELECT COUNT(*) c FROM checkpoints').get().c;
   const code = `CP-${String(count + 1).padStart(2, '0')}`;
-  const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq) VALUES(?,?,?,?,?,?)');
-  const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1);
+  const ins = db.prepare('INSERT INTO checkpoints(code,name,lat,lng,radius,seq,site_id) VALUES(?,?,?,?,?,?,?)');
+  const info = ins.run(code, name, lat, lng, Number(radius) || Number(defR?.value || 100), Number(seq) || count + 1, site_id || defSite?.id || null);
   audit(req.user.name, 'checkpoint_create', { code, name });
   res.json({ id: info.lastInsertRowid, code });
 });
@@ -401,14 +414,24 @@ app.post('/api/guard/checkin', auth, (req, res) => {
       .run(req.user.userId, postId, 'checked_in', now());
     shift = db.prepare('SELECT * FROM shifts WHERE id=?').get(info.lastInsertRowid);
   }
-  const checkpoints = db.prepare('SELECT * FROM checkpoints ORDER BY seq').all();
+  const checkpoints = db.prepare('SELECT * FROM checkpoints WHERE site_id IS NULL OR site_id=? ORDER BY seq').all(post.site_id || 0);
   const today = new Date().toISOString().slice(0, 10);
   const schedule = db.prepare(
     'SELECT * FROM shift_schedules WHERE guard_id=? AND date=? ORDER BY start_time LIMIT 1'
   ).get(req.user.userId, today);
+  // เตือนถ้าเช็คอินนอกเวร (เทียบเวลาท้องถิ่น UTC+7)
+  let scheduleWarning = null;
+  if (schedule) {
+    const nowBkk = new Date(Date.now() + 7 * 3600 * 1000);
+    const hm = nowBkk.toISOString().slice(11, 16);
+    const inWindow = schedule.start_time <= schedule.end_time
+      ? (hm >= schedule.start_time && hm <= schedule.end_time)
+      : (hm >= schedule.start_time || hm <= schedule.end_time); // ข้ามเที่ยงคืน
+    if (!inWindow) scheduleWarning = `⚠️ ตอนนี้ ${hm} น. อยู่นอกเวร ${schedule.start_time}–${schedule.end_time} น. ของคุณ`;
+  }
   audit(req.user.name, 'checkin', { shift: shift.id, post: post.name });
   broadcast({ type: 'shift', shift: { ...shift, guard_name: req.user.name, post_name: post.name } });
-  res.json({ shift, post, checkpoints, schedule });
+  res.json({ shift, post, checkpoints, schedule, scheduleWarning });
 });
 
 // ---------- guard: กดเริ่มปฏิบัติงาน ----------
