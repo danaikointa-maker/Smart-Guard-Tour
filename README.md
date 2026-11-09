@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 📴 ออฟไลน์ครบทุกเหตุการณ์ + 🔋 รายงานแบต
+ถ้าเน็ตขาดตอนกด **SOS หรือแจ้งเหตุการณ์** ระบบจะเก็บเข้าคิวในเครื่อง (localStorage) แล้วซิงก์อัตโนมัติเมื่อกลับออนไลน์ (`POST /api/guard/sync` รองรับ `sos` + `incidents` ด้วย) — รปภ. แจ้งแบตเครื่องส่งขึ้นเซิร์ฟเวอร์ทุกครั้งที่ส่ง GPS แดชบอร์ดหัวหน้า (`GET /api/admin/guards-status` + WS event `battery`) จะโชว์ 🔋% ต่อกะ สีแดงเมื่อ ≤20%
+
 ## 🔔 Web Push (แจ้งเตือนเด้งในเบราว์เซอร์)
 หน้า Admin auto-subscribe Push (service worker `sw.js` + VAPID key สร้างอัตโนมัติ) — จะได้รับเด้งทันทีเมื่อมี **SOS / เหตุการณ์ใหม่ / จุดตรวจที่ขาด** แม้ปิดแท็บ; ปุ่ม "🔔 ทดสอบ Push" อยู่ในแท็บแผนที่สด
 
@@ -51,7 +54,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 27 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 29 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

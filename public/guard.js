@@ -8,7 +8,7 @@ const show = (id) => { document.querySelectorAll('.container > div').forEach(d =
 const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: null, post: null,
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
   cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null,
-  cfg: { gps_interval_sec: 4 }, pending: new Set(),
+  cfg: { gps_interval_sec: 4 }, pending: new Set(), batt: null,
   queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]') };
 
 async function api(path, body) {
@@ -74,7 +74,7 @@ async function doCheckin(qr) {
 async function startShift() {
   try {
     await api('/api/guard/start', { shiftId: S.shift.id });
-    connectWS(); startGPS(); initMap(); renderCpList(); show('scr-patrol'); flushQueue();
+    connectWS(); startGPS(); initBattery(); initMap(); renderCpList(); show('scr-patrol'); flushQueue();
     toast('เริ่มติดตาม GPS แล้ว 📍');
   } catch (e) { toast(e.message); }
 }
@@ -99,10 +99,20 @@ function startGPS() {
 }
 function sendPos() {
   if (!S.myPos || !S.shift) return;
-  const msg = { type: 'pos', shiftId: S.shift.id, lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc };
+  const batt = S.batt ? { battery: S.batt.level, charging: S.batt.charging } : {};
+  const msg = { type: 'pos', shiftId: S.shift.id, lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, ...batt };
   if (S.ws && S.ws.readyState === 1) { S.ws.send(JSON.stringify(msg)); return; }
-  api('/api/guard/position', { shiftId: S.shift.id, ...S.myPos })
+  api('/api/guard/position', { shiftId: S.shift.id, ...S.myPos, ...batt })
     .catch(() => enqueue({ kind: 'pos', lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, ts: new Date().toISOString() }));
+}
+// ---------- แบตเครื่อง: รายงานสถานะให้แดชบอร์ดหัวหน้า ----------
+function initBattery() {
+  if (!navigator.getBattery) return;
+  navigator.getBattery().then((b) => {
+    S.batt = { level: b.level, charging: b.charging };
+    b.addEventListener('levelchange', () => { S.batt.level = b.level; });
+    b.addEventListener('chargingchange', () => { S.batt.charging = b.charging; });
+  }).catch(() => {});
 }
 
 // ---------- โหมดออฟライン: คิวในเครื่อง + ซิงก์อัตโนมัติ ----------
@@ -119,8 +129,10 @@ async function flushQueue() {
     const j = await api('/api/guard/sync', {
       positions: items.filter(i => i.kind === 'pos'),
       visits: items.filter(i => i.kind === 'visit'),
+      sos: items.filter(i => i.kind === 'sos'),
+      incidents: items.filter(i => i.kind === 'incident'),
     });
-    toast(`📶 ซิงก์ข้อมูลออฟラインแล้ว: GPS ${j.positions} จุด, เช็คจุด ${j.visits_ok} สำเร็จ`);
+    toast(`📶 ซิงก์ข้อมูลออฟラインแล้ว: GPS ${j.positions} จุด, เช็คจุด ${j.visits_ok} สำเร็จ, SOS ${j.sos || 0}, เหตุการณ์ ${j.incidents || 0}`);
     if (j.visits_ok) location.reload();
   } catch (e) { S.queue = items.concat(S.queue); localStorage.setItem('sgt_queue', JSON.stringify(S.queue)); }
 }
@@ -229,7 +241,12 @@ async function sos() {
   try {
     const j = await api('/api/guard/sos', { shiftId: S.shift.id, lat: S.myPos?.lat, lng: S.myPos?.lng });
     toast('🚨 ส่ง SOS แล้ว! ' + (j.sent_to.length ? 'ส่งถึง: ' + j.sent_to.join(', ') : 'แจ้งในแผนที่สดของหัวหน้าแล้ว'));
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      enqueue({ kind: 'sos', shiftId: S.shift?.id, lat: S.myPos?.lat, lng: S.myPos?.lng, ts: new Date().toISOString() });
+      toast('📴 ออฟไลน์ — เก็บ SOS ไว้ในเครื่อง จะส่งอัตโนมัติเมื่อกลับออนไลน์');
+    } else toast(e.message);
+  }
 }
 
 // ---------- เช็คเอาต์ ----------
@@ -273,5 +290,12 @@ async function submitIncident() {
       description: $('inc-desc').value.trim(), lat: S.myPos?.lat, lng: S.myPos?.lng, accuracy: S.myPos?.acc, photo: incPhoto });
     closeIncident();
     toast('📢 ส่งแจ้งเหตุการณ์ #' + j.id + ' แล้ว ' + (j.sent_to.length ? '→ ' + j.sent_to.join(', ') : '(เข้ากล่อง Admin)'));
-  } catch (e) { toast(e.message); }
+  } catch (e) {
+    if (!navigator.onLine || e.message === 'Failed to fetch') {
+      enqueue({ kind: 'incident', type: $('inc-type').value, description: $('inc-desc').value.trim(),
+        lat: S.myPos?.lat, lng: S.myPos?.lng, accuracy: S.myPos?.acc, photo: incPhoto, ts: new Date().toISOString() });
+      closeIncident();
+      toast('📴 ออฟไลน์ — เก็บเหตุการณ์ไว้ในเครื่อง จะส่งอัตโนมัติเมื่อกลับออนไลน์');
+    } else toast(e.message);
+  }
 }

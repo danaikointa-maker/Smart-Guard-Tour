@@ -104,6 +104,12 @@ CREATE TABLE IF NOT EXISTS push_subs(
   sub_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS device_status(
+  user_id INTEGER PRIMARY KEY,
+  battery REAL,
+  charging INTEGER,
+  ts TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit_logs(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,

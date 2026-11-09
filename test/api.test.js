@@ -316,6 +316,44 @@ test('web push: vapid key ออกได้ + subscribe บันทึก + te
   assert.ok(t.j.subs >= 1);
 });
 
+test('ออฟไลน์ sync: SOS + เหตุการณ์ในคิวซิงก์สำเร็จ (นับถูกต้อง)', async () => {
+  const g = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  assert.equal(g.status, 200);
+  const a3 = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  assert.equal(a3.status, 200);
+  const ov = await api('GET', '/api/admin/overview', null, a3.j.token);
+  const q2 = ov.j.posts[0].qr;
+  const ci = await api('POST', '/api/guard/checkin', { qr: q2 }, g.j.token);
+  assert.equal(ci.status, 200);
+  const st = await api('POST', '/api/guard/start', { shiftId: ci.j.shift.id }, g.j.token);
+  assert.equal(st.status, 200);
+  const sync = await api('POST', '/api/guard/sync', {
+    positions: [{ lat: 13.73, lng: 100.54, accuracy: 8 }],
+    sos: [{ shiftId: ci.j.shift.id, lat: 13.73, lng: 100.54 }],
+    incidents: [{ type: 'ทดสอบออฟไลน์', description: 'คิวตอนเน็ตขาด', lat: 13.73, lng: 100.54 }],
+  }, g.j.token);
+  assert.equal(sync.status, 200);
+  assert.equal(sync.j.positions, 1);
+  assert.equal(sync.j.sos, 1);
+  assert.equal(sync.j.incidents, 1);
+  const ov2 = await api('GET', '/api/admin/overview', null, a3.j.token);
+  assert.ok(ov2.j.incidents.some(x => x.type && x.type.includes('ออฟไลน์')));
+  globalThis.__shiftId2 = ci.j.shift.id;
+  globalThis.__guardTok2 = g.j.token;
+});
+
+test('รายงานแบต: position ส่ง battery แล้ว guards-status ของ admin เห็นค่า', async () => {
+  const p = await api('POST', '/api/guard/position', { shiftId: globalThis.__shiftId2, lat: 13.731, lng: 100.541, accuracy: 5, battery: 0.37, charging: true }, globalThis.__guardTok2);
+  assert.equal(p.status, 200);
+  const a4 = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const gs = await api('GET', '/api/admin/guards-status', null, a4.j.token);
+  assert.equal(gs.status, 200);
+  const row = gs.j.guards.find(x => x.shift_id === globalThis.__shiftId2);
+  assert.ok(row, 'ต้องมีกะนี้อยู่ใน guards-status');
+  assert.equal(Math.round(row.battery * 100), 37);
+  assert.equal(row.charging, 1);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
