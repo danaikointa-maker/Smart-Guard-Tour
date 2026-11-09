@@ -751,6 +751,24 @@ async function raiseSOS(user, shiftId, lat, lng) {
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='sos'").all();
   const sent = [];
   for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { sos: true, shiftId: s.id, lat, lng }));
+  // 📨 สำรองทาง SMS gateway — ทำงานแม้มือถือของผู้รับ/ผู้ส่งไม่มีเน็ต (ผ่านผู้ให้บริการ SMS)
+  const gw = db.prepare("SELECT value FROM settings WHERE key='sms_gateway_url'").get()?.value || '';
+  const key = db.prepare("SELECT value FROM settings WHERE key='sms_api_key'").get()?.value || '';
+  const nums = (db.prepare("SELECT value FROM settings WHERE key='sms_sos_numbers'").get()?.value || '')
+    .split(',').map(x => x.trim()).filter(Boolean);
+  if (gw && nums.length) {
+    for (const to of nums) {
+      try {
+        const r = await fetch(gw, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(key ? { Authorization: 'Bearer ' + key } : {}) },
+          body: JSON.stringify({ to, message: text.replace(/\n/g, ' ') }),
+          signal: AbortSignal.timeout(8000),
+        });
+        sent.push(`sms:${to}:` + (r.ok ? 'ok' : 'http' + r.status));
+      } catch (e) { sent.push(`sms:${to}:error`); }
+    }
+  }
   return sent;
 }
 app.post('/api/guard/sos', auth, async (req, res) => {

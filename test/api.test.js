@@ -545,6 +545,38 @@ test('สถิติ รปภ. + streak: endpoint คืน aggregate ถู�
   assert.equal(f.status, 403);
 });
 
+test('SOS สำรองทาง SMS gateway: ตั้งค่าแล้วกด SOS ต้องยิง SMS ไปเบอร์ที่ตั้งไว้', async () => {
+  const received = [];
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', c => b += c);
+    req.on('end', () => { received.push({ headers: req.headers, body: JSON.parse(b || '{}') }); res.writeHead(200); res.end('ok'); });
+  });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  try {
+    const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+    await api('PUT', '/api/admin/settings', {
+      sms_gateway_url: `http://127.0.0.1:${port}/send`,
+      sms_api_key: 'testkey',
+      sms_sos_numbers: '0812345678, 0898765432',
+    }, a.j.token);
+    const g = await api('POST', '/api/login', { name: 'สมชาย', pin: '1234' });
+    const ov = await api('GET', '/api/admin/overview', null, a.j.token);
+    const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, g.j.token);
+    assert.equal(ci.status, 200);
+    const sos = await api('POST', '/api/guard/sos', { shiftId: ci.j.shift.id, lat: 13.73, lng: 100.54 }, g.j.token);
+    assert.equal(sos.status, 200);
+    assert.ok(sos.j.sent_to.some(x => x.startsWith('sms:0812345678:ok')), 'ต้องส่ง SMSถึงเบอร์แรกสำเร็จ: ' + JSON.stringify(sos.j.sent_to));
+    assert.ok(sos.j.sent_to.some(x => x.startsWith('sms:0898765432:ok')), 'ต้องส่ง SMSถึงเบอร์สองสำเร็จ');
+    assert.equal(received.length, 2);
+    assert.equal(received[0].headers.authorization, 'Bearer testkey');
+    assert.ok(received[0].body.message.includes('SOS'));
+    assert.equal(received[0].body.to, '0812345678');
+    // คืนค่า setting เดิม
+    await api('PUT', '/api/admin/settings', { sms_gateway_url: '', sms_api_key: '', sms_sos_numbers: '' }, a.j.token);
+  } finally { srv.close(); }
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
