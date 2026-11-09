@@ -9,7 +9,7 @@ const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: nul
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
   cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null, routeOrder: new Map(), lastRoute: 0,
   cfg: { gps_interval_sec: 4 }, pending: new Set(), batt: null,
-  queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]') };
+  queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]'), shotFlags: [] };
 
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': S.token },
@@ -251,6 +251,43 @@ function shoot() {
   $('img-shot').src = S.shotData; $('img-shot').classList.remove('hidden');
   $('cam-shot').classList.add('hidden');
   $('btn-shoot').classList.add('hidden'); $('btn-send').classList.remove('hidden');
+  // 🤖 AI ตรวจรูปอัตโนมัติ (วิเคราะห์ในเครื่อง): ความสว่าง + ความคมชัด
+  S.shotFlags = analyzePhoto(c);
+  const el = $('shot-flags');
+  if (S.shotFlags.length) {
+    el.textContent = '🤖 ตรวจพบ: ' + S.shotFlags.map(f => ({ dark: '🌑 รูปมืดเกิน', blurry: '🌫️ รูปเบลอ', lowres: '🔍 ความละเอียดต่ำ' }[f])).join(' · ') + ' — ถ่ายใหม่ถ้าทำได้';
+    el.classList.remove('hidden');
+  } else { el.classList.add('hidden'); el.textContent = '🤖 ✅ รูปชัด สว่าง พร้อมใช้'; el.style.color = '#15803d'; setTimeout(() => { el.classList.add('hidden'); el.style.color = '#b45309'; }, 2500); }
+}
+// วิเคราะห์รูปบน canvas: mean luminance + variance ของ Laplacian (ความเบลอ)
+function analyzePhoto(srcCanvas) {
+  const flags = [];
+  try {
+    const w = Math.min(160, srcCanvas.width), h = Math.min(120, srcCanvas.height);
+    if (srcCanvas.width < 320) flags.push('lowres');
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(srcCanvas, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h).data;
+    const gray = [];
+    let lumSum = 0;
+    for (let i = 0; i < img.length; i += 4) {
+      const g = 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2];
+      gray.push(g); lumSum += g;
+    }
+    const mean = lumSum / gray.length;
+    if (mean < 45) flags.push('dark');
+    // Laplacian variance
+    let lapSum = 0, lapSq = 0, n = 0;
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+      lapSum += lap; lapSq += lap * lap; n++;
+    }
+    const lapVar = n ? lapSq / n - (lapSum / n) ** 2 : 0;
+    if (lapVar < 120) flags.push('blurry');
+  } catch (e) {}
+  return flags;
 }
 function closeCam() {
   $('modal-cam').classList.add('hidden');
@@ -260,7 +297,7 @@ async function sendVisit() {
   if (!S.shotData || !S.shotCp || !S.myPos) return;
   try {
     const j = await api('/api/guard/visit', { shiftId: S.shift.id, checkpointId: S.shotCp.id,
-      lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, photo: S.shotData });
+      lat: S.myPos.lat, lng: S.myPos.lng, accuracy: S.myPos.acc, photo: S.shotData, flags: S.shotFlags });
     S.visits.add(S.shotCp.id);
     (S.confirmedSet = S.confirmedSet || new Set());
     if (j.confirmed) S.confirmedSet.add(S.shotCp.id); else S.confirmedSet.delete(S.shotCp.id);
@@ -274,7 +311,7 @@ async function sendVisit() {
     if (e.status === 409) toast('⚠️ ' + e.message + ' — เดินเข้าใกล้จุดแล้วถ่ายใหม่');
     else if (!navigator.onLine || e.message === 'Failed to fetch') {
       enqueue({ kind: 'visit', checkpointId: S.shotCp.id, lat: S.myPos.lat, lng: S.myPos.lng,
-        accuracy: S.myPos.acc, photo: S.shotData, ts: new Date().toISOString() });
+        accuracy: S.myPos.acc, photo: S.shotData, flags: S.shotFlags, ts: new Date().toISOString() });
       toast('📴 ออฟไลน์ — เก็บรูปไว้ในเครื่องแล้ว จะส่งอัตโนมัติเมื่อเน็ตกลับมา');
     } else toast(e.message);
     renderCpList();

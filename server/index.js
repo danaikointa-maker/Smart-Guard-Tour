@@ -555,7 +555,7 @@ function saveBattery(userId, shiftId, battery, charging) {
 
 // ---------- guard: ถ่ายรูปเช็คจุดตรวจ + ตรวจ geofence ----------
 app.post('/api/guard/visit', auth, async (req, res) => {
-  const { shiftId, checkpointId, lat, lng, accuracy, photo } = req.body || {};
+  const { shiftId, checkpointId, lat, lng, accuracy, photo, flags } = req.body || {};
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
   if (!s || s.status === 'checked_out') return res.status(400).json({ error: 'กะไม่ active' });
   const cp = db.prepare('SELECT * FROM checkpoints WHERE id=?').get(checkpointId);
@@ -583,9 +583,10 @@ app.post('/api/guard/visit', auth, async (req, res) => {
       confirmed = 0; // รอคนที่ 2 มายืนยัน
     }
   }
+  const flagStr = Array.isArray(flags) ? JSON.stringify(flags.filter(f => ['dark','blurry','lowres'].includes(f))) : '';
   const info = db.prepare(
-    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,confirmed_by,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
-  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, confirmed, paired ? req.user.userId : null, now());
+    'INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,confirmed_by,ts,flags) VALUES(?,?,?,?,?,?,?,?,?,?,?)'
+  ).run(s.id, cp.id, lat, lng, accuracy ?? null, inside ? 1 : 0, photoPath, confirmed, paired ? req.user.userId : null, now(), flagStr);
   const visit = db.prepare('SELECT * FROM visits WHERE id=?').get(info.lastInsertRowid);
   audit(req.user.name, inside ? (confirmed ? 'visit_ok' : 'visit_pending') : 'visit_outside', { shift: s.id, cp: cp.code, dist: Math.round(dist), two: !!cp.require_two_person });
   broadcast({ type: 'visit', shiftId: s.id, guard: req.user.name, checkpoint: cp.code, inside, confirmed, dist: Math.round(dist), ts: visit.ts });
@@ -842,8 +843,9 @@ app.post('/api/guard/sync', auth, async (req, res) => {
         const buf = Buffer.from(String(v.photo).split(',')[1], 'base64');
         photoPath = await savePhoto(UPLOAD_DIR, `v_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.jpg`, buf);
       }
-      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,ts) VALUES(?,?,?,?,?,?,?,?,?)')
-        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, 1, v.ts || now());
+      const flagStr = Array.isArray(v.flags) ? JSON.stringify(v.flags.filter(f => ['dark','blurry','lowres'].includes(f))) : '';
+      db.prepare('INSERT INTO visits(shift_id,checkpoint_id,lat,lng,accuracy,inside,photo,confirmed,ts,flags) VALUES(?,?,?,?,?,?,?,?,?,?)')
+        .run(s.id, cp.id, v.lat, v.lng, v.accuracy ?? null, inside ? 1 : 0, photoPath, 1, v.ts || now(), flagStr);
       if (inside) vOk++; else vFail++;
     }
   }

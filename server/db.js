@@ -156,6 +156,7 @@ addCol('notif_groups', 'chat_id', "TEXT NOT NULL DEFAULT ''");
 addCol('users', 'vva_user_id', "TEXT");
 addCol('checkpoints', 'require_two_person', 'INTEGER NOT NULL DEFAULT 0');
 addCol('visits', 'confirmed', 'INTEGER NOT NULL DEFAULT 1');
+addCol('visits', 'flags', "TEXT NOT NULL DEFAULT ''"); // JSON array — AI ตรวจรูปอัตโนมัติ (dark/blurry/lowres)
 addCol('visits', 'confirmed_by', 'INTEGER');
 addCol('posts', 'site_id', 'INTEGER');
 addCol('checkpoints', 'site_id', 'INTEGER');
