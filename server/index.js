@@ -35,6 +35,35 @@ app.use('/api/login', (req, res, next) => {
   next();
 });
 
+// ---------- สาธารณะ: ภาพรวมสถานะ (ไม่ต้องล็อกอิน — ข้อมูลรวมอย่างเดียว ไม่มีพิกัด/ชื่อ รปภ.) ----------
+app.get('/api/public/summary', (req, res) => {
+  const get = (k, dflt) => { const r = db.prepare('SELECT value FROM settings WHERE key=?').get(k); return r ? r.value : dflt; };
+  if (get('public_dashboard', 'true') !== 'true')
+    return res.status(403).json({ error: 'ผู้ดูแลปิดแดชบอร์ดสาธารณะอยู่', public_dashboard: false });
+  const today = new Date().toISOString().slice(0, 10);
+  const posts = db.prepare('SELECT id, name, lat, lng FROM posts ORDER BY id').all().map(p => {
+    //ความคืบหน้าวันนี้ของป้อมนี้: จุดที่ถูกเช็คแล้ว (inside) ในกะของป้อมนี้วันนี้
+    const row = db.prepare(`
+      SELECT COUNT(DISTINCT v.checkpoint_id) c
+      FROM visits v JOIN shifts s ON s.id=v.shift_id
+      WHERE s.post_id=? AND v.inside=1 AND substr(v.ts,1,10)=?`).get(p.id, today);
+    const total = db.prepare('SELECT COUNT(*) c FROM checkpoints WHERE COALESCE(site_id,0)=COALESCE((SELECT site_id FROM posts WHERE id=?),0)').get(p.id).c;
+    return { post_id: p.id, name: p.name, visited_today: row.c, total };
+  });
+  const active = db.prepare("SELECT COUNT(*) c FROM shifts WHERE status IN ('checked_in','patrolling')").get().c;
+  const patrolNow = db.prepare("SELECT COUNT(*) c FROM shifts WHERE status='patrolling'").get().c;
+  const openInc = db.prepare("SELECT COUNT(*) c FROM incidents WHERE status='open'").get().c;
+  const sosToday = db.prepare('SELECT COUNT(*) c FROM audit_logs WHERE action=\'sos\' AND substr(ts,1,10)=?').get(today).c;
+  const lastAct = db.prepare('SELECT MAX(ts) ts FROM gps_tracks').get();
+  const shiftsToday = db.prepare('SELECT COUNT(*) c FROM shifts WHERE substr(checked_in_at,1,10)=?').get(today).c;
+  res.json({
+    public_dashboard: true, site_name: get('site_name', 'Smart Guard Tour'),
+    as_of: now(), active_shifts: active, patrolling_now: patrolNow,
+    shifts_today: shiftsToday, open_incidents: openInc, sos_today: sosToday,
+    last_activity: lastAct ? lastAct.ts : null, posts,
+  });
+});
+
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: now(), uptime: process.uptime() }));
 app.get('/api/openapi.json', (req, res) => res.sendFile(path.join(__dirname, '..', 'docs', 'openapi.json')));
 app.use(express.static(path.join(__dirname, '..', 'public')));

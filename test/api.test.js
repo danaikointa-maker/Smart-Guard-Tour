@@ -395,6 +395,26 @@ test('webhook ภายนอก: เหตุการณ์ถูกส่ง�
   } finally { srv.close(); }
 });
 
+test('แดชบอร์ดสาธารณะ: ไม่ต้องล็อกอิน + ข้อมูลรวมเท่านั้น (ไม่มีพิกัด/ชื่อ รปภ.) + ปิดได้ด้วย setting', async () => {
+  const p = await api('GET', '/api/public/summary');
+  assert.equal(p.status, 200);
+  assert.equal(p.j.public_dashboard, true);
+  assert.ok(Array.isArray(p.j.posts));
+  const raw = JSON.stringify(p.j);
+  assert.ok(!raw.includes('guard_name'), 'ต้องไม่มีชื่อ รปภ.');
+  assert.ok(!/"lat"|"lng"/.test(raw), 'ต้องไม่มีพิกัด');
+  // ปิดผ่าน setting แล้วต้อง 403
+  const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const off = await api('PUT', '/api/admin/settings', { public_dashboard: 'false' }, a.j.token);
+  assert.equal(off.status, 200);
+  const p2 = await api('GET', '/api/public/summary');
+  assert.equal(p2.status, 403);
+  const on = await api('PUT', '/api/admin/settings', { public_dashboard: 'true' }, a.j.token);
+  assert.equal(on.status, 200);
+  const p3 = await api('GET', '/api/public/summary');
+  assert.equal(p3.status, 200);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
