@@ -27,6 +27,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 ## 📊 ฮีตแมป & ส่งออกรายงาน (Admin)
 แท็บ 🗺️ แผนที่สดมีปุ่ม **🔥 ฮีตแมปจุดตรวจ**; ในรายงานกด **📥 CSV** หรือ **🖨️ พิมพ์/บันทึก PDF**
 
+## 🚀 Deploy โปรดักชัน
+ดูคู่มือเต็มที่ `docs/deploy.md` — Docker Compose + HTTPS (certbot/nginx) + PostgreSQL+PostGIS (`scripts/migrate-to-postgres.sql` ครบ 16 ตารางตรงตามสคีมา) + ตัวแปรแวดล้อม +เช็กลิสต์ก่อนขึ้นจริง
+
 ## 🐳 รันด้วย Docker
 ```bash
 docker compose up --build    # เปิดที่ http://localhost:3000
@@ -86,7 +89,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 38 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 39 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน
