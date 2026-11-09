@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 🔔 Web Push (แจ้งเตือนเด้งในเบราว์เซอร์)
+หน้า Admin auto-subscribe Push (service worker `sw.js` + VAPID key สร้างอัตโนมัติ) — จะได้รับเด้งทันทีเมื่อมี **SOS / เหตุการณ์ใหม่ / จุดตรวจที่ขาด** แม้ปิดแท็บ; ปุ่ม "🔔 ทดสอบ Push" อยู่ในแท็บแผนที่สด
+
 ## 🔐 QR หมดอายุ + session TTL + ปิดกะอัตโนมัติ
 ตั้งค่าใน ⚙️: `qr_ttl_hours` (0=ไม่หมดอายุ) → QR เก่าใช้ไม่ได้ (410) + ปุ่ม **🔄 QR ใหม่** ต่อป้อมในแท็บ ➕ · `session_ttl_hours` (เริ่มต้น 12 ชม.) → token หมดอายุต้องล็อกอินใหม่ · ถ้า รปภ. ลืมเช็คเอาต์ ระบบจะ**ปิดกะอัตโนมัติ**หลัง 12 ชม. หรือเลยเวลาสิ้นสุดเวร (เช็คทุกนาที + รันเองได้ `POST /api/admin/auto-close`) · rate limit login นับเฉพาะครั้งที่ผิด (10/5 นาที/IP)
 
@@ -48,7 +51,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 26 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 27 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

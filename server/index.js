@@ -8,6 +8,7 @@ const { haversineM } = require('./geo');
 const { makePostQRWithPng, verifyPostQR } = require('./qr');
 const { savePhoto } = require('./storage');
 const XLSX = require('xlsx');
+const webpush = require('web-push');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -29,8 +30,8 @@ app.use('/api/login', (req, res, next) => {
   const ip = req.ip;
   const nowT = Date.now();
   const arr = (loginHits.get(ip) || []).filter(t => nowT - t < 5 * 60 * 1000);
-  if (arr.length >= 10) return res.status(429).json({ error: ' thử nhiềuครั้งเกินไป — ลองใหม่ใน 5 นาที' });
-  arr.push(nowT); loginHits.set(ip, arr);
+  if (arr.length >= 10) return res.status(429).json({ error: 'ล็อกอินผิดบ่อยเกินไป — ลองใหม่ใน 5 นาที' });
+  res.on('finish', () => { if (res.statusCode === 401) { arr.push(nowT); loginHits.set(ip, arr); } });
   next();
 });
 
@@ -684,6 +685,7 @@ app.post('/api/guard/sos', auth, async (req, res) => {
 เวลา ${now()}`;
   audit(req.user.name, 'sos', { shift: s.id, lat, lng });
   broadcast({ type: 'sos', guard: req.user.name, shiftId: s.id, lat, lng, ts: now() });
+  sendPush('🚨 SOS ฉุกเฉิน!', `${req.user.name} กด SOS ที่ ${lat}, ${lng}`, { sos: true, shiftId: s.id });
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='sos'").all();
   const sent = [];
   for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { sos: true, shiftId: s.id, lat, lng }));
@@ -709,6 +711,7 @@ setInterval(() => {
           const u = db.prepare('SELECT name FROM users WHERE id=?').get(s.guard_id);
           const text = `⚠️ จุดตรวจ ${cp.code} (${cp.name}) ยังไม่ถูกเช็ค — รปภ. ${u.name} กะ #${s.id} เริ่มมาแล้ว 30+ นาที`;
           broadcast({ type: 'missed_cp', shiftId: s.id, cp: cp.code, guard: u.name });
+          sendPush('⚠️ จุดตรวจที่ขาด', `${u.name} ยังไม่เช็ค ${cp.code} (${cp.name})`, { shiftId: s.id });
           db.prepare("SELECT * FROM notif_groups WHERE event_type='missed_checkpoint'").all()
             .forEach(g => sendToGroup(g, text, { shiftId: s.id, checkpoint: cp.code }));
         }
@@ -802,6 +805,7 @@ app.post('/api/guard/incident', auth, async (req, res) => {
   db.prepare('UPDATE incidents SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', id);
   audit(req.user.name, 'incident', { id, type });
   broadcast({ type: 'incident', id, guard: req.user.name, incidentType: type, lat, lng, ts: now() });
+  sendPush('🚨 เหตุการณ์ใหม่: ' + type, `${req.user.name}: ${description || ''}`, { incidentId: id, type });
   res.json({ ok: true, id, sent_to: sent });
 });
 
@@ -971,6 +975,44 @@ app.post('/api/admin/auto-close', auth, (req, res) => {
   res.json({ ok: true, closed: autoCloseShifts() });
 });
 setInterval(() => { try { autoCloseShifts(); } catch (e) { console.error('[autoclose]', e.message); } }, 60 * 1000);
+
+
+// ---------- Web Push (แจ้งเตือนเด้งในเบราว์เซอร์ Admin/หัวหน้า) ----------
+let VAPID = { publicKey: '', privateKey: '' };
+{
+  const pub = db.prepare("SELECT value FROM settings WHERE key='vapid_public'").get();
+  const priv = db.prepare("SELECT value FROM settings WHERE key='vapid_private'").get();
+  if (pub && priv) { VAPID = { publicKey: pub.value, privateKey: priv.value }; }
+  else {
+    VAPID = webpush.generateVAPIDKeys();
+    db.prepare("INSERT OR REPLACE INTO settings(key,value,label,updated_at) VALUES('vapid_public',?, 'VAPID public key', ?)").run(VAPID.publicKey, now());
+    db.prepare("INSERT OR REPLACE INTO settings(key,value,label,updated_at) VALUES('vapid_private',?, 'VAPID private key (อย่าเผยแพร่)', ?)").run(VAPID.privateKey, now());
+  }
+  webpush.setVapidDetails('mailto:admin@smartguard.local', VAPID.publicKey, VAPID.privateKey);
+}
+app.get('/api/push/vapid-key', (req, res) => res.json({ publicKey: VAPID.publicKey }));
+app.post('/api/push/subscribe', auth, (req, res) => {
+  const sub = req.body?.subscription;
+  if (!sub || !sub.endpoint) return res.status(400).json({ error: 'subscription ไม่ถูกต้อง' });
+  db.prepare('INSERT OR REPLACE INTO push_subs(user_id,endpoint,sub_json,created_at) VALUES(?,?,?,?)')
+    .run(req.user.userId, sub.endpoint, JSON.stringify(sub), now());
+  res.json({ ok: true });
+});
+async function sendPush(title, body, data = {}) {
+  const subs = db.prepare('SELECT * FROM push_subs').all();
+  for (const s of subs) {
+    try {
+      await webpush.sendNotification(JSON.parse(s.sub_json), JSON.stringify({ title, body, data, ts: now() }));
+    } catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) db.prepare('DELETE FROM push_subs WHERE id=?').run(s.id);
+    }
+  }
+}
+app.post('/api/admin/push/test', auth, async (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'supervisor') return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  await sendPush('🧪 ทดสอบ Push', 'ระบบ Smart Guard Tour ส่งแจ้งเตือนถึงคุณได้แล้ว');
+  res.json({ ok: true, subs: db.prepare('SELECT COUNT(*) c FROM push_subs').get().c });
+});
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
