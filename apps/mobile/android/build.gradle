@@ -1,0 +1,19 @@
+// Top-level build file for the Smart Guard Tour Flutter app.
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    subproject -> subproject.buildDir = "${rootProject.buildDir}/${subproject.name}"
+}
+subprojects {
+    evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
