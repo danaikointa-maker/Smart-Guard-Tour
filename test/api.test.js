@@ -527,6 +527,24 @@ test('ประหยัดดาต้าซิม: settings มี gps_min_mov
   assert.ok(js.includes('gps_min_move_m') && js.includes('lastPosSent'), 'ต้องส่ง GPS ตามการขยับ');
 });
 
+test('สถิติ รปภ. + streak: endpoint คืน aggregate ถูกต้อง (admin/supervisor อ่านได้, guard อ่านไม่ได้)', async () => {
+  const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const r = await api('GET', '/api/admin/guard-stats', null, a.j.token);
+  assert.equal(r.status, 200);
+  assert.ok(Array.isArray(r.j.guards) && r.j.guards.length >= 2, 'ต้องมี รปภ. อย่างน้อย 2 คน');
+  const sm = r.j.guards.find(g => g.name === 'สมชาย');
+  assert.ok(sm, 'ต้องมี สมชาย');
+  assert.ok(sm.visits_ok >= 1, 'สมชายเช็คจุดสำเร็จอย่างน้อย 1 (จาก flow test)');
+  assert.ok(typeof sm.streak === 'number');
+  // เรียงจาก visits_ok มากสุดก่อน
+  for (let i = 1; i < r.j.guards.length; i++)
+    assert.ok(r.j.guards[i - 1].visits_ok >= r.j.guards[i].visits_ok, 'ต้องเรียง visits_ok ลดหลั่น');
+  // guard อ่านไม่ได้
+  const g = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  const f = await api('GET', '/api/admin/guard-stats', null, g.j.token);
+  assert.equal(f.status, 403);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
