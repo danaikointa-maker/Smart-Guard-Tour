@@ -167,7 +167,13 @@ function renderPosts() {
   const site = curSite();
   $('post-list').innerHTML = S.data.posts.filter(p => !site || !p.site_id || p.site_id === site).map(p =>
     `<div class="cp-item"><div>🚔 <b>${p.name}</b><br><span class="muted">รัศมี QR ${p.radius} ม.</span></div>
-     <button class="btn-sm btn-ghost" onclick="delPost(${p.id})">ลบ</button></div>`).join('') || '<p class="muted">ยังไม่มีป้อม</p>';
+     <div style="display:flex;gap:6px;"><button class="btn-sm btn-ghost" onclick="rotateQr(${p.id})">🔄 QR ใหม่</button>
+     <button class="btn-sm btn-ghost" onclick="delPost(${p.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มีป้อม</p>';
+}
+async function rotateQr(id) {
+  if (!confirm('ออก QR ใหม่สำหรับป้อมนี้? (QR เด่าจะใช้ไม่ได้ทันที)')) return;
+  try { await api(`/api/admin/posts/${id}/rotate-qr`, {}); toast('ออก QR ใหม่แล้ว 🔄 — ดาวน์โหลดในแท็บ 🎫'); await loadAll(); }
+  catch (e) { toast(e.message); }
 }
 function renderCpsAdmin() {
   const site = curSite();
