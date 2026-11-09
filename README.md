@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 🌐 Webhooks ภายนอก (API เปิด — เชื่อม VVA / CCTV / ระบบอื่น)
+ตั้งค่าในแท็บ 🔔 → การ์ด Webhooks: ใส่ URL + secret + events ที่สนใจ (`sos, incident, incident_resolved, visit, missed_cp, shift, report`) — ระบบ POST JSON ไปพร้อม header ลายเซ็น `X-SGT-Signature: sha256=<HMAC-SHA256(secret, timestamp+"."+body)>` retry 3 ครั้ง และมีหน้า 📜 บันทึกการส่งให้ตรวจสอบย้อนหลัง
+
 ## 📴 ออฟไลน์ครบทุกเหตุการณ์ + 🔋 รายงานแบต
 ถ้าเน็ตขาดตอนกด **SOS หรือแจ้งเหตุการณ์** ระบบจะเก็บเข้าคิวในเครื่อง (localStorage) แล้วซิงก์อัตโนมัติเมื่อกลับออนไลน์ (`POST /api/guard/sync` รองรับ `sos` + `incidents` ด้วย) — รปภ. แจ้งแบตเครื่องส่งขึ้นเซิร์ฟเวอร์ทุกครั้งที่ส่ง GPS แดชบอร์ดหัวหน้า (`GET /api/admin/guards-status` + WS event `battery`) จะโชว์ 🔋% ต่อกะ สีแดงเมื่อ ≤20%
 
@@ -54,7 +57,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 29 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 30 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

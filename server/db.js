@@ -104,6 +104,25 @@ CREATE TABLE IF NOT EXISTS push_subs(
   sub_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS webhooks(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  label TEXT NOT NULL,
+  url TEXT NOT NULL,
+  secret TEXT NOT NULL DEFAULT '',
+  events TEXT NOT NULL DEFAULT 'sos,incident,visit,missed_cp,shift,report',
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS webhook_deliveries(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  webhook_id INTEGER,
+  event TEXT NOT NULL,
+  status_code INTEGER,
+  ok INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  ts TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS device_status(
   user_id INTEGER PRIMARY KEY,
   battery REAL,
