@@ -502,6 +502,23 @@ test('AI ตรวจรูปอัตโนมัติ: visit ส่ง flags
   assert.ok(synced && JSON.parse(synced.flags || '[]').includes('lowres'), 'sync ต้องเก็บ flags ด้วย');
 });
 
+test('Flutter app build-ready: มีโครง android/ (Gradle) ครบ + สคริปต์บิ้ว APK', async () => {
+  const mob = path.join(__dirname, '..', 'apps', 'mobile');
+  for (const f of ['pubspec.yaml', 'android/settings.gradle', 'android/build.gradle',
+    'android/app/build.gradle', 'android/gradle.properties',
+    'android/gradle/wrapper/gradle-wrapper.properties',
+    'android/app/src/main/AndroidManifest.xml',
+    'android/app/src/main/kotlin/com/smartguardtour/smart_guard_tour/MainActivity.kt',
+    'build-apk.sh']) {
+    assert.ok(fs.existsSync(path.join(mob, f)), 'ต้องมี ' + f);
+  }
+  const manifest = fs.readFileSync(path.join(mob, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  for (const p of ['INTERNET', 'ACCESS_FINE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'CAMERA', 'FOREGROUND_SERVICE_LOCATION'])
+    assert.ok(manifest.includes(p), 'manifest ต้องมีสิทธิ์ ' + p);
+  const appGradle = fs.readFileSync(path.join(mob, 'android/app/build.gradle'), 'utf8');
+  assert.ok(appGradle.includes('com.android.application') && appGradle.includes('dev.flutter.flutter-gradle-plugin'));
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {

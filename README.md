@@ -69,7 +69,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 34 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 35 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน
@@ -84,6 +84,8 @@ npm test     # 34 เคส: flow รปภ. ครบ, geofence, QR ปลอ�
 
 ## 📱 Native Mobile App (Flutter)
 โค้ดอยู่ที่ `apps/mobile/` — รองรับ **Background GPS ขณะล็อกจอ** (Foreground Service + `background_locator` ตามนโยบาย Google Play) + คิวออฟライン + SSO
+
+บิ้ว APK ได้เลยด้วย `apps/mobile/build-apk.sh` (โครง `android/` Gradle 8.10/AGP 8.7 พร้อมใช้ — รันบนเครื่องที่มี Flutter SDK+JDK17+Android SDK; ได้ `build/app/outputs/flutter-apk/app-release.apk`)
 
 ## วิธีรัน
 ```bash

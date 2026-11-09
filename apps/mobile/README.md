@@ -20,3 +20,16 @@ lib/
 flutter pub get
 flutter run   # Android: baseUrl default 10.0.2.2:3000 คือ host machine
 ```
+
+## บิ้ว APK (Flutter + Android SDK + Gradle)
+โครง `android/` (Gradle 8.10 / AGP 8.7 / Kotlin 2.0) พร้อมใช้แล้ว — ต้องรันบนเครื่องที่มี Flutter SDK + JDK 17 + Android SDK:
+```bash
+./build-apk.sh          # ตรวจ env → pub get → flutter build apk --release
+# หรือเอง:
+flutter pub get && flutter build apk --release
+# APK: build/app/outputs/flutter-apk/app-release.apk
+```
+> หมายเหตุ: `android/gradle/wrapper/gradle-wrapper.jar` เป็นไบนารี — ถ้ายังไม่มี ให้รัน `flutter create --platforms=android .` หนึ่งครั้งเพื่อ generate (สคริปต์ทำให้อัตโนมัติ) · ก่อนขึ้น Play: สร้าง keystore แล้วตั้ง `signingConfig release` ใน `android/app/build.gradle`
+
+## สิทธิ์ที่ต้องขอ (AndroidManifest พร้อมแล้ว)
+`INTERNET` (ซิม/WiFi) · `ACCESS_FINE/COARSE/BACKGROUND_LOCATION` + `FOREGROUND_SERVICE_LOCATION` (GPS ขณะล็อกจอ) · `CAMERA` (ถ่ายรูปจุดตรวจ) · `POST_NOTIFICATIONS`
