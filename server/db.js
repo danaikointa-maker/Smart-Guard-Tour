@@ -129,6 +129,7 @@ addCol('posts', 'site_id', 'INTEGER');
 addCol('checkpoints', 'site_id', 'INTEGER');
 addCol('incidents', 'status', "TEXT NOT NULL DEFAULT 'open'"); // open | resolved
 addCol('incidents', 'resolved_by', 'TEXT');
+addCol('posts', 'qr_issued_at', 'TEXT');
 
 const now = () => new Date().toISOString();
 const BASE = { lat: 13.7307, lng: 100.5418 }; // ลุมพินี (เดโม่)
@@ -163,6 +164,9 @@ if (userCount === 0) {
   insSch.run(3, 1, today, '14:00', '22:00');
   console.log('[db] seeded demo data (admin/admin123 · สมชาย/1234 · วันดี/1234 · วินัย/1234 หัวหน้า · ลูกบ้าน A/1234)');
 }
+
+// QR เดิมให้ issued_at = created_at
+db.prepare("UPDATE posts SET qr_issued_at=created_at WHERE qr_issued_at IS NULL").run();
 
 // ---- seed โครงการเดโม่ + ผูกข้อมูลเดิม (idempotent) ----
 {
@@ -214,6 +218,8 @@ if (userCount === 0) {
     ['timezone', 'Asia/Bangkok', 'โซนเวลา'],
     ['sso_enabled', 'false', 'เปิด SSO ผ่านระบบ VVA (true/false)'],
     ['sso_provider_name', 'VVA SSO', 'ชื่อผู้ให้บริการ SSO (แสดงบนหน้าล็อกอิน)'],
+    ['qr_ttl_hours', '0', 'อายุของ QR ป้อม (ชั่วโมง) — 0 = ไม่หมดอายุ'],
+    ['session_ttl_hours', '12', 'อายุ session ล็อกอิน (ชั่วโมง)'],
     ['enforce_schedule', 'false', 'บังคับเช็คอินเฉพาะในเวร (true/false) — true = ปฏิเสธถ้านอกเวร'],
     ['gps_retention_days', '90', 'เก็บข้อมูล GPS ย้อนหลัง (วัน) — ลบอัตโนมัติเกินกว่านี้ (PDPA)'],
     ['map_provider', 'osm', 'ผู้ให้บริการแผนที่ (osm/google)'],

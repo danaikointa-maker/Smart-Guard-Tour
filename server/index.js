@@ -47,6 +47,11 @@ function auth(req, res, next) {
   const t = req.headers['x-token'];
   const u = t && tokens.get(t);
   if (!u) return res.status(401).json({ error: 'ต้องเข้าสู่ระบบก่อน' });
+  const ttlH = parseFloat(db.prepare("SELECT value FROM settings WHERE key='session_ttl_hours'").get()?.value || '12');
+  if (ttlH > 0 && u.ts && Date.now() - u.ts > ttlH * 3600 * 1000) {
+    tokens.delete(t);
+    return res.status(401).json({ error: 'เซสชันหมดอายุ — ล็อกอินใหม่' });
+  }
   req.user = u;
   next();
 }
@@ -108,7 +113,7 @@ app.post('/api/sso/login', (req, res) => {
   }
   audit(payload.name, 'sso_login', { provider: payload.iss });
   const token = crypto.randomBytes(24).toString('hex');
-  tokens.set(token, { userId: user.id, role: user.role, name: user.name });
+  tokens.set(token, { userId: user.id, role: user.role, name: user.name, ts: Date.now() });
   res.json({ token, user: { id: user.id, name: user.name, role: user.role }, via: 'sso' });
 });
 
@@ -169,13 +174,28 @@ app.get('/api/sso/callback', async (req, res) => {
     }
     audit(name, 'sso_login_oidc', { iss: 'vva' });
     const token = crypto.randomBytes(24).toString('hex');
-    tokens.set(token, { userId: user.id, role: user.role, name: user.name });
+    tokens.set(token, { userId: user.id, role: user.role, name: user.name, ts: Date.now() });
     // ส่ง token กลับหน้าเว็บด้วย fragment (ไม่ log) — หน้าเว็บอ่านแล้ว login
     res.send(`<script>localStorage.setItem('sgt_sso_token', '${token}'); location.href = '/sso-done.html';</script>`);
   } catch (e) {
     res.status(500).send('SSO callback error: ' + e.message);
   }
 });
+
+
+// ตรวจ QR + อายุ
+function checkPostQR(qr) {
+  const postId = verifyPostQR(qr);
+  if (!postId) return { error: 'QR ไม่ถูกต้องหรือปลอม — ลองสแกนอีกครั้ง' };
+  const post = db.prepare('SELECT * FROM posts WHERE id=?').get(postId);
+  if (!post) return { error: 'ไม่พบป้อมนี้' };
+  const ttl = db.prepare("SELECT value FROM settings WHERE key='qr_ttl_hours'").get();
+  const hours = parseFloat(ttl?.value || '0');
+  if (hours > 0 && post.qr_issued_at && (Date.now() - new Date(post.qr_issued_at).getTime()) > hours * 3600 * 1000) {
+    return { error: 'QR หมดอายุแล้ว — ขอ QR ใหม่จากผู้ดูแล', expired: true, post };
+  }
+  return { post };
+}
 
 // ---------- auth ----------
 app.get('/api/me', auth, (req, res) => res.json(req.user));
@@ -185,7 +205,7 @@ app.post('/api/login', (req, res) => {
   const row = db.prepare('SELECT * FROM users WHERE name=? AND pin=?').get(name, pin);
   if (!row) return res.status(401).json({ error: 'ชื่อหรือ PIN ไม่ถูกต้อง' });
   const token = crypto.randomBytes(24).toString('hex');
-  tokens.set(token, { userId: row.id, role: row.role, name: row.name });
+  tokens.set(token, { userId: row.id, role: row.role, name: row.name, ts: Date.now() });
   audit(row.name, 'login', { role: row.role });
   res.json({ token, user: { id: row.id, name: row.name, role: row.role } });
 });
@@ -420,10 +440,10 @@ app.get('/api/admin/reports/:id', auth, (req, res) => {
 // ---------- guard: สแกน QR เช็คอิน ----------
 app.post('/api/guard/checkin', auth, (req, res) => {
   const { qr } = req.body || {};
-  const postId = verifyPostQR(qr);
-  if (!postId) return res.status(400).json({ error: 'QR ไม่ถูกต้องหรือปลอม — ลองสแกนอีกครั้ง' });
-  const post = db.prepare('SELECT * FROM posts WHERE id=?').get(postId);
-  if (!post) return res.status(404).json({ error: 'ไม่พบป้อมนี้' });
+  const chk = checkPostQR(qr);
+  if (chk.error) return res.status(chk.expired ? 410 : 400).json({ error: chk.error });
+  const post = chk.post;
+  const postId = post.id;
   // ถ้ามีกะที่ยังไม่จบอยู่ ให้ใช้กะนั้นต่อ
   const open = db.prepare(
     "SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1"
@@ -541,8 +561,9 @@ app.post('/api/guard/visit', auth, async (req, res) => {
 // ---------- guard: สแกน QR เช็คเอาต์ + สร้างรายงาน ----------
 app.post('/api/guard/checkout', auth, async (req, res) => {
   const { shiftId, qr } = req.body || {};
-  const postId = verifyPostQR(qr);
-  if (!postId) return res.status(400).json({ error: 'QR ไม่ถูกต้อง — ลองสแกนอีกครั้ง' });
+  const chk = checkPostQR(qr);
+  if (chk.error) return res.status(chk.expired ? 410 : 400).json({ error: chk.error });
+  const postId = chk.post.id;
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
   if (!s) return res.status(404).json({ error: 'ไม่พบกะนี้' });
   if (s.status === 'checked_out') return res.status(400).json({ error: 'กะนี้เช็คเอาต์ไปแล้ว' });
@@ -910,6 +931,46 @@ app.get('/api/admin/stats/export.xlsx', auth, async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="stats_${Date.now()}.xlsx"`);
   res.send(buf);
 });
+
+
+// ---------- admin: ออก QR ใหม่ (rotate) ----------
+app.post('/api/admin/posts/:id/rotate-qr', auth, async (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  const post = db.prepare('SELECT * FROM posts WHERE id=?').get(req.params.id);
+  if (!post) return res.status(404).json({ error: 'ไม่พบป้อม' });
+  const qr = await makePostQRWithPng(post.id, post.name);
+  db.prepare('UPDATE posts SET qr=?, qr_png=?, qr_issued_at=? WHERE id=?').run(qr.payload, qr.png, now(), post.id);
+  audit(req.user.name, 'qr_rotate', { post: post.id });
+  res.json({ qr: qr.payload, qr_png: qr.png });
+});
+
+// ---------- ปิดกะอัตโนมัติถ้าลืมเช็คเอาต์ ----------
+function autoCloseShifts() {
+  // กะที่เริ่มมาเกิน 12 ชม. หรือเลยเวลาสิ้นสุดของเวรวันนี้
+  const rows = db.prepare(
+    `SELECT s.*, sc.end_time FROM shifts s
+     LEFT JOIN shift_schedules sc ON sc.guard_id=s.guard_id AND sc.date=date('now')
+     WHERE s.status IN ('checked_in','patrolling')`).all();
+  const nowBkk = new Date(Date.now() + 7 * 3600 * 1000).toISOString();
+  let closed = 0;
+  for (const s of rows) {
+    const started = new Date(s.started_at || s.checked_in_at).getTime();
+    const stale = Date.now() - started > 12 * 3600 * 1000;
+    const pastEnd = s.end_time && nowBkk.slice(11, 16) > s.end_time;
+    if (stale || pastEnd) {
+      db.prepare("UPDATE shifts SET status='checked_out', checked_out_at=? WHERE id=?").run(now(), s.id);
+      audit('system', 'shift_auto_closed', { shift: s.id, reason: stale ? 'stale>12h' : 'past_schedule_end' });
+      broadcast({ type: 'shift', shift: { ...s, status: 'checked_out', auto: true } });
+      closed++;
+    }
+  }
+  return closed;
+}
+app.post('/api/admin/auto-close', auth, (req, res) => {
+  if (req.user.role !== 'admin') return res.status(403).json({ error: 'ต้องเป็น admin' });
+  res.json({ ok: true, closed: autoCloseShifts() });
+});
+setInterval(() => { try { autoCloseShifts(); } catch (e) { console.error('[autoclose]', e.message); } }, 60 * 1000);
 
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {

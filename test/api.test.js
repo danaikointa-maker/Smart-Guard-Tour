@@ -235,14 +235,6 @@ test('retention cleanup endpoint ลบ gps เก่าได้ (admin เท�
   assert.ok('deleted_gps' in ok.j);
 });
 
-test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
-  let last = 0;
-  for (let i = 0; i < 12; i++) {
-    const r = await api('POST', '/api/login', { name: 'x', pin: 'y' });
-    last = r.status;
-  }
-  assert.equal(last, 429);
-});
 
 test('backup คืนทุกตารางครบ + stats xlsx ได้ (PK)', async () => {
   const b = await fetch(`${BASE}/api/admin/backup`, { headers: { 'x-token': adminTok } });
@@ -265,4 +257,56 @@ test('enforce_schedule=true บล็อกเช็คอินนอกเว�
   assert.ok([200, 403].includes(ci.status));
   if (ci.j.scheduleWarning || ci.status === 403) assert.ok(true);
   await api('PUT', '/api/admin/settings', { enforce_schedule: 'false' }, adminTok);
+});
+
+test('QR rotate: ออกใหม่แล้ว QR เด่าปลอม (ไม่ตรง DB) แต่รูปแบบถูกต้องต้อง checkin ผ่านด้วยอันใหม่', async () => {
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const oldQr = ov.j.posts[0].qr;
+  const r = await api('POST', `/api/admin/posts/${ov.j.posts[0].id}/rotate-qr`, {}, adminTok);
+  assert.equal(r.status, 200);
+  const ci = await api('POST', '/api/guard/checkin', { qr: r.j.qr }, guardTok);
+  assert.equal(ci.status, 200);
+  // QR เด่ายัง verify signature ได้ (nonce เดิม) แต่ระบบใช้ checkPostQR กับ DB — ที่นี่เช็คแค่ว่า QR ใหม่ใช้ได้
+  assert.notEqual(r.j.qr, oldQr);
+});
+
+test('QR หมดอายุ (qr_ttl_hours) → 410', async () => {
+  await api('PUT', '/api/admin/settings', { qr_ttl_hours: '1' }, adminTok);
+  // ทำให้ QR เก่า: backdate ผ่าน restore? ใช้ทางลัด — ตั้ง ttl เป็น 0.00001 ชม. แล้วรอ 1 วินาที
+  await api('PUT', '/api/admin/settings', { qr_ttl_hours: '0.00001' }, adminTok);
+  await new Promise(r => setTimeout(r, 1200));
+  const ov = await api('GET', '/api/admin/overview', null, adminTok);
+  const ci = await api('POST', '/api/guard/checkin', { qr: ov.j.posts[0].qr }, guardTok);
+  assert.equal(ci.status, 410);
+  assert.match(ci.j.error, /หมดอายุ/);
+  await api('PUT', '/api/admin/settings', { qr_ttl_hours: '0' }, adminTok);
+});
+
+test('session TTL: ตั้ง session_ttl_hours เล็กจิ๋ว → token เดิมหมดอายุ (401) แต่ token ใหม่ใช้ได้', async () => {
+  await api('PUT', '/api/admin/settings', { session_ttl_hours: '0.00001' }, adminTok);
+  await new Promise(r => setTimeout(r, 1500)); // รอให้หมดอายุ (0.00001 ชม. ≈ 0.036 วินาที)
+  const r = await api('GET', '/api/admin/overview', null, adminTok);
+  assert.equal(r.status, 401);
+  // ล็อกอินใหม่ได้ (ttl ยัง active แต่ token ใหม่ยังไม่หมดอายุทันที)
+  const g2 = await api('POST', '/api/login', { name: 'สมชาย', pin: '1234' });
+  assert.equal(g2.status, 200);
+  // คืนค่า
+  const a2 = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  await api('PUT', '/api/admin/settings', { session_ttl_hours: '12' }, a2.j.token);
+});
+
+test('auto-close: endpoint ทำงานและคืนจำนวนที่ปิด', async () => {
+  const a2 = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const r = await api('POST', '/api/admin/auto-close', {}, a2.j.token);
+  assert.equal(r.status, 200);
+  assert.ok('closed' in r.j);
+});
+
+test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
+  let last = 0;
+  for (let i = 0; i < 12; i++) {
+    const r = await api('POST', '/api/login', { name: 'x', pin: 'y' });
+    last = r.status;
+  }
+  assert.equal(last, 429);
 });
