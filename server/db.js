@@ -244,6 +244,7 @@ db.prepare("UPDATE posts SET qr_issued_at=created_at WHERE qr_issued_at IS NULL"
     ['resident_see_status', 'true', 'ลูกบ้านเห็นสถานะการตรวจ (true/false)'],
     ['resident_see_live_location', 'false', 'ลูกบ้านเห็นตำแหน่งสด รปภ. (ค่าเริ่มต้นต้องเป็น false)'],
     ['resident_see_history', 'false', 'ลูกบ้านเห็นเส้นทางย้อนหลัง (true/false)'],
+    ['public_dashboard', 'true', 'แดชบอร์ดสาธารณะ (ไม่ต้องล็อกอิน) แสดงภาพรวมเท่านั้น (true/false)'],
     ['map_lat', String(BASE.lat), 'แผนที่: ละติจูดเริ่มต้น'],
     ['map_lng', String(BASE.lng), 'แผนที่: ลองจิจูดเริ่มต้น'],
     ['map_zoom', '16', 'แผนที่: ซูมเริ่มต้น'],

@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 🌐 แดชบอร์ดสาธารณะ (Public Dashboard — design ข้อ 10)
+หน้า `/public.html` ไม่ต้องล็อกอิน แสดงภาพรวมสถานะความปลอดภัย: กำลังตรวจกี่กะ, ตรวจครบกี่จุดต่อป้อม (progress bar), เหตุการณ์ที่เปิดอยู่, SOS วันนี้ — **ข้อมูลรวมอย่างเดียว ไม่มีชื่อ รปภ./พิกัด/เส้นทาง** ปิดได้ใน ⚙️ (`public_dashboard`)
+
 ## 🌐 Webhooks ภายนอก (API เปิด — เชื่อม VVA / CCTV / ระบบอื่น)
 ตั้งค่าในแท็บ 🔔 → การ์ด Webhooks: ใส่ URL + secret + events ที่สนใจ (`sos, incident, incident_resolved, visit, missed_cp, shift, report`) — ระบบ POST JSON ไปพร้อม header ลายเซ็น `X-SGT-Signature: sha256=<HMAC-SHA256(secret, timestamp+"."+body)>` retry 3 ครั้ง และมีหน้า 📜 บันทึกการส่งให้ตรวจสอบย้อนหลัง
 
@@ -57,7 +60,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 30 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 31 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน

@@ -373,7 +373,7 @@ function renderSchedules() {
 
 // ---------- ตั้งค่าระบบ ----------
 function renderSettings() {
-  const boolKeys = ['resident_see_status', 'resident_see_live_location', 'resident_see_history'];
+  const boolKeys = ['resident_see_status', 'resident_see_live_location', 'resident_see_history', 'public_dashboard'];
   $('settings-list').innerHTML = S.data.settings.map(s => {
     const isBool = boolKeys.includes(s.key);
     const val = isBool
