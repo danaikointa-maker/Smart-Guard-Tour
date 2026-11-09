@@ -238,6 +238,8 @@ db.prepare("UPDATE posts SET qr_issued_at=created_at WHERE qr_issued_at IS NULL"
   const insSet = db.prepare('INSERT OR IGNORE INTO settings(key,value,label,updated_at) VALUES(?,?,?,?)');
   const seed = [
     ['gps_interval_sec', '4', 'ความถี่ส่ง GPS (วินาที)'],
+    ['gps_min_move_m', '15', 'ส่ง GPS เมื่อขยับเกินกี่เมตรจากจุดก่อนหน้า (ประหยัดดาต้า)'],
+    ['photo_max_px', '800', 'ขนาดรูปสูงสุดก่อนส่ง (px ด้านยาว) — ประหยัดดาต้า'],
     ['gps_min_distance_m', '10', 'ส่ง GPS เมื่อขยับอย่างน้อย (เมตร)'],
     ['default_post_radius_m', '30', 'รัศมีเริ่มต้นของป้อม/QR (เมตร)'],
     ['default_checkpoint_radius_m', '100', 'รัศมีเริ่มต้นของจุดตรวจ (เมตร)'],
