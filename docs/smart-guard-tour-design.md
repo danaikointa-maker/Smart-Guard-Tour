@@ -193,3 +193,34 @@
 ---
 
 เอกสารนี้เป็นจุดเริ่มต้น — เลือกหัวข้อที่อยากเจาะลึก (เช่น สคีมาละเอียด, โค้ดตัวอย่าง geofence, หรือหน้าจอแอป) แล้วผมจะขยายให้ต่อได้เลยครับ 🙌
+
+---
+
+## 12. สถานะการ implement จริง (Implementation Status — อัปเดต 2026-11)
+
+ระบบ implement ด้วย stack: **Node.js + Express + SQLite (node:sqlite)** + WebSocket ของตัวเอง + หน้าเว็บ vanilla JS (ไม่พึ่ง framework) — ตรงสถาปัตยกรรมในเอกสารนี้ทั้งหมด (ตาราง §2 ครบ + เพิ่ม `sites`/`device_status`/`push_subs`/`webhooks`/`webhook_deliveries`)
+
+| ข้อในเอกสาร | สถานะ | รายละเอียด (PR) |
+|---|---|---|
+| §3 Guard flow 4 ขั้น + QR HMAC + geofence server-side | ✅ | #1–#2 |
+| §4 Realtime (WS ของตัวเอง, ไม่พึ่ง Google Maps) | ✅ | #2 — วัด latency 2–4ms |
+| §5 Background GPS | ✅ (เว็บ: PWA+SW / native: Flutter `apps/mobile`) | #12, #19 |
+| §6 รายงาน LINE/Telegram | ✅ | #3 (+ SMS gateway สำรอง SOS #16) |
+| §7 Privacy by Default ลูกบ้าน | ✅ | #1 + public dashboard aggregate-only #8 |
+| §8 ความปลอดภัย | ✅ | #3 (headers, rate limit, health, OpenAPI) |
+| §9 ข้อ 1 SOS | ✅ | #1 + Web Push #5 + SMS fallback #16 |
+| §9 ข้อ 2 Missed checkpoint | ✅ | #2 |
+| §9 ข้อ 3 โหมดออฟライン | ✅ | #6 (คิวครบทุกเหตุการณ์) |
+| §9 ข้อ 4 Heatmap/สถิติ/รายงานสัปดาห์ | ✅ | #3 + streak leaderboard #14 |
+| §9 ข้อ 5 Two-person verification | ✅ | #2 |
+| §9 ข้อ 6 แบตเครื่อง | ✅ | #6 |
+| §9 ข้อ 7 Webhook/API เปิด | ✅ | #7 (HMAC + retry + delivery log) |
+| §9 ข้อ 8 Multi-site | ✅ | #3 |
+| §10 Dashboard สาธารณะ | ✅ | #8 |
+| §10 AI ตรวจรูป | ✅ (on-device: dark/blurry/lowres) | #11 |
+| §10 NFC แทน QR | ✅ (Web NFC) | #9 |
+| §10 เส้นทางไดนามิก | ✅ | #10 |
+| QR TTL/rotate, session TTL, auto-close | ✅ | #4 |
+| CI + เทสต์ 40 เคส + deploy guide + TWA | ✅ | #15, #17, #18, #19 |
+
+**สรุป: 19 PR merge บน main · `npm test` 40/40 · CI GitHub Actions เขียว · รันจริงที่ port 3000**
