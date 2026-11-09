@@ -32,6 +32,9 @@ Admin เปิด flag "👥 2 คน" ต่อจุดตรวจ (แท�
 docker compose up --build    # เปิดที่ http://localhost:3000
 ```
 
+## 📨 SOS สำรองทาง SMS gateway (zero-signal fallback)
+ตั้งค่าใน ⚙️: `sms_gateway_url` + `sms_api_key` + `sms_sos_numbers` (หลายเบอร์คั่นจุลภาค) — ตอน รปภ. กด **SOS** ระบบจะ POST `{to, message}` ไปที่ gateway ทุกเบอร์ (แนบ Bearer token) **นอกเหนือจาก** LINE/Telegram/webhook — ใช้ได้แม้มือถือไม่มีเน็ต (SMS วิ่งบนสัญญาณโทรศัพท์) · ผลการส่งแสดงใน `sent_to` เช่น `sms:0812345678:ok`
+
 ## 🏆 สถิติและ streak ของ รปภ. (gamification แบบ aggregate — design ข้อ 10)
 `GET /api/admin/guard-stats` คืนสถิติรวมต่อ รปภ.: จำนวนกะ/จบกะ, จุดที่เช็คสำเร็จ, นอกรัศมี, SOS, **streak วันติดต่อกันที่มีกะ** + เรียงอันดับ 🥇🥈🥉 ในแท็บ 📊 ของ Admin — แสดงเฉพาะสถิติรวม ไม่มีตำแหน่ง (เป็นส่วนตัวตามนโยบาย)
 
@@ -80,7 +83,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 37 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 38 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน
