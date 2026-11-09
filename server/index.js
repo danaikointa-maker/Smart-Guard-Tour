@@ -1058,6 +1058,58 @@ app.get('/api/admin/guards-status', auth, (req, res) => {
   res.json({ guards: rows });
 });
 
+// ---------- admin: จัดการ Webhook ภายนอก (API เปิด) ----------
+function isAdminOrSupervisor(req, res) {
+  if (req.user.role !== 'admin' && req.user.role !== 'supervisor') { res.status(403).json({ error: 'ไม่มีสิทธิ์' }); return false; }
+  return true;
+}
+app.get('/api/admin/webhooks', auth, (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  const rows = db.prepare(`SELECT w.*, (SELECT COUNT(*) FROM webhook_deliveries d WHERE d.webhook_id=w.id) deliveries,
+    (SELECT COUNT(*) FROM webhook_deliveries d WHERE d.webhook_id=w.id AND d.ok=1) ok_count FROM webhooks w ORDER BY w.id DESC`).all();
+  res.json({ webhooks: rows, events: WH_EVENTS });
+});
+app.post('/api/admin/webhooks', auth, (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  const { label, url, secret, events, active } = req.body || {};
+  if (!label || !url || !/^https?:\/\//.test(url)) return res.status(400).json({ error: 'ต้องใส่ชื่อและ URL (http/https)' });
+  const ev = Array.isArray(events) ? events.join(',') : (events || 'sos,incident,visit,missed_cp,shift,report');
+  const info = db.prepare('INSERT INTO webhooks(label,url,secret,events,active,created_at) VALUES(?,?,?,?,?,?)')
+    .run(label, url, secret || '', ev, active === false ? 0 : 1, now());
+  res.json({ ok: true, id: info.lastInsertRowid });
+});
+app.put('/api/admin/webhooks/:id', auth, (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  const { label, url, secret, events, active } = req.body || {};
+  const cur = db.prepare('SELECT * FROM webhooks WHERE id=?').get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'ไม่พบ webhook' });
+  db.prepare('UPDATE webhooks SET label=?,url=?,secret=?,events=?,active=? WHERE id=?').run(
+    label ?? cur.label, url ?? cur.url, secret ?? cur.secret,
+    Array.isArray(events) ? events.join(',') : (events ?? cur.events),
+    active === undefined ? cur.active : (active ? 1 : 0), req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/admin/webhooks/:id', auth, (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  db.prepare('DELETE FROM webhooks WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+app.post('/api/admin/webhooks/:id/test', auth, async (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  const h = db.prepare('SELECT * FROM webhooks WHERE id=?').get(req.params.id);
+  if (!h) return res.status(404).json({ error: 'ไม่พบ webhook' });
+  const ok = await deliverWebhook(h, 'test', { label: h.label, by: req.user.name });
+  res.json({ ok, delivered: ok ? 1 : 0 });
+});
+app.get('/api/admin/webhooks/deliveries', auth, (req, res) => {
+  if (!isAdminOrSupervisor(req, res)) return;
+  const q = req.query.webhook_id ? 'SELECT * FROM webhook_deliveries WHERE webhook_id=? ORDER BY id DESC LIMIT 100' : 'SELECT * FROM webhook_deliveries ORDER BY id DESC LIMIT 100';
+  const rows = req.query.webhook_id
+    ? db.prepare(q).all(req.query.webhook_id)
+    : db.prepare(q).all();
+  res.json({ deliveries: rows });
+});
+
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Smart Guard Tour running: http://0.0.0.0:${PORT}`);
@@ -1068,6 +1120,53 @@ const clients = new Set();
 function broadcast(msg) {
   const data = JSON.stringify(msg);
   for (const c of clients) if (c.readyState === 1) c.send(data);
+  // webhook ภายนอก (API เปิด) — ข้าม event ที่ถี่เกิน (gps/battery)
+  if (msg.type !== 'gps' && msg.type !== 'battery') dispatchWebhooks(msg.type, msg);
+}
+
+// ---------- Webhook engine: ส่งออกไประบบภายนอก (VVA/CCTV/อื่นๆ) ----------
+const WH_EVENTS = ['sos', 'incident', 'incident_resolved', 'visit', 'missed_cp', 'shift', 'report'];
+function whSubscribed(events, ev) {
+  return (events || '').split(',').map(x => x.trim()).includes(ev) || (events || '').split(',').map(x => x.trim()).includes('*');
+}
+async function dispatchWebhooks(event, payload) {
+  let hooks = [];
+  try { hooks = db.prepare('SELECT * FROM webhooks WHERE active=1').all(); } catch (e) { return; }
+  for (const h of hooks) {
+    if (!whSubscribed(h.events, event)) continue;
+    deliverWebhook(h, event, payload).catch(() => {});
+  }
+}
+async function deliverWebhook(h, event, payload) {
+  const ts = now();
+  const body = JSON.stringify({ event, ts, data: payload });
+  const sig = h.secret ? crypto.createHmac('sha256', h.secret).update(ts + '.' + body).digest('hex') : '';
+  let attempts = 0, code = 0, ok = 0, detail = '';
+  for (let i = 0; i < 3; i++) {
+    attempts++;
+    try {
+      const r = await fetch(h.url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-SGT-Event': event,
+          'X-SGT-Timestamp': ts,
+          ...(sig ? { 'X-SGT-Signature': 'sha256=' + sig } : {}),
+        },
+        body,
+        signal: AbortSignal.timeout(8000),
+      });
+      code = r.status; ok = r.ok ? 1 : 0;
+      detail = ok ? 'ok' : 'http' + r.status;
+      if (ok) break;
+    } catch (e) { code = 0; detail = e.message.slice(0, 60); }
+    if (i < 2) await new Promise(r => setTimeout(r, 1000 * (i + 1) * 2));
+  }
+  try {
+    db.prepare('INSERT INTO webhook_deliveries(webhook_id,event,status_code,ok,attempts,detail,ts) VALUES(?,?,?,?,?,?,?)')
+      .run(h.id, event, code, ok, attempts, detail, ts);
+  } catch (e) {}
+  return ok;
 }
 
 wss.on('connection', (ws, req) => {

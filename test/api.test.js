@@ -6,6 +6,8 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const http = require('http');
+const crypto = require('crypto');
 
 const PORT = 3100;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -352,6 +354,45 @@ test('รายงานแบต: position ส่ง battery แล้ว guard
   assert.ok(row, 'ต้องมีกะนี้อยู่ใน guards-status');
   assert.equal(Math.round(row.battery * 100), 37);
   assert.equal(row.charging, 1);
+});
+
+test('webhook ภายนอก: เหตุการณ์ถูกส่งออกพร้อมลายเซ็น HMAC ถูกต้อง + มีบันทึกการส่ง', async () => {
+  const received = [];
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', c => b += c);
+    req.on('end', () => { received.push({ headers: req.headers, body: b }); res.writeHead(200); res.end('ok'); });
+  });
+  await new Promise(r => srv.listen(0, '127.0.0.1', r));
+  const whPort = srv.address().port;
+  try {
+    const secret = 'topsecret';
+    const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+    assert.equal(a.status, 200);
+    const wh = await api('POST', '/api/admin/webhooks', {
+      label: 'test-hook', url: `http://127.0.0.1:${whPort}/hook`, secret, events: ['incident'],
+    }, a.j.token);
+    assert.equal(wh.status, 200);
+    const g = await api('POST', '/api/login', { name: 'สมชาย', pin: '1234' });
+    const inc = await api('POST', '/api/guard/incident', { type: 'webhook-test', description: 'x', lat: 13.7, lng: 100.5 }, g.j.token);
+    assert.equal(inc.status, 200);
+    let got = null;
+    for (let i = 0; i < 30 && !got; i++) {
+      got = received.find(r => r.headers['x-sgt-event'] === 'incident');
+      if (!got) await new Promise(r => setTimeout(r, 300));
+    }
+    assert.ok(got, 'ต้องได้รับ webhook event incident');
+    const ts = got.headers['x-sgt-timestamp'];
+    const expectSig = 'sha256=' + crypto.createHmac('sha256', secret).update(ts + '.' + got.body).digest('hex');
+    assert.equal(got.headers['x-sgt-signature'], expectSig);
+    const payload = JSON.parse(got.body);
+    assert.equal(payload.event, 'incident');
+    assert.equal(payload.data.incidentType, 'webhook-test');
+    const lg = await api('GET', '/api/admin/webhooks/deliveries', null, a.j.token);
+    assert.ok(lg.j.deliveries.some(d => d.webhook_id === wh.j.id && d.event === 'incident' && d.ok === 1));
+    // test endpoint
+    const t = await api('POST', `/api/admin/webhooks/${wh.j.id}/test`, {}, a.j.token);
+    assert.equal(t.status, 200);
+  } finally { srv.close(); }
 });
 
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {

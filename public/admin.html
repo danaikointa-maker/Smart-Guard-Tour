@@ -108,6 +108,19 @@
         <button class="btn-primary" style="margin-top:8px;" onclick="addNotif()">บันทึกกลุ่ม</button>
       </div>
       <div class="card"><h2>กลุ่มที่ตั้งไว้</h2><div id="notif-list"></div></div>
+      <div class="card">
+        <h2>🌐 Webhooks ภายนอก (API เปิด — เชื่อม VVA / CCTV / ระบบอื่น)</h2>
+        <p class="muted">ระบบจะ POST JSON <code>{event, ts, data}</code> ไปที่ URL พร้อม header <code>X-SGT-Event</code>, <code>X-SGT-Timestamp</code>, <code>X-SGT-Signature: sha256=&lt;HMAC-SHA256(secret, timestamp+"."+body)&gt;</code> — retry 3 ครั้งถ้าส่งไม่สำเร็จ และมีบันทึกการส่งให้ตรวจสอบ</p>
+        <div class="row">
+          <input id="wh-label" placeholder="ชื่อ เช่น ระบบ VVA / กล้อง CCTV">
+          <input id="wh-url" placeholder="https://example.com/hook" style="flex:2">
+          <input id="wh-secret" placeholder="Secret (เว้นว่างได้)">
+        </div>
+        <div class="row" style="margin-top:8px;" id="wh-events"></div>
+        <button class="btn-primary" style="margin-top:8px;" onclick="addWebhook()">บันทึก Webhook</button>
+      </div>
+      <div class="card"><h2>🌐 Webhooks ที่ตั้งไว้</h2><div id="wh-list"></div></div>
+      <div class="card"><h2>📜 บันทึกการส่ง (deliveries ล่าสุด 100)</h2><div id="wh-log"></div></div>
     </div>
 
     <div id="tab-users" class="hidden">

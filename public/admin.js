@@ -64,7 +64,7 @@ async function loadAll() {
     S.batt = {};
     for (const r of g.guards) if (r.battery != null) S.batt[r.shift_id] = { battery: Math.round(r.battery * 100), charging: !!r.charging };
   } catch (e) {}
-  renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderLiveList();
+  renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderLiveList(); loadWebhooks();
 }
 
 // ---------- แผนที่สด ----------
@@ -291,6 +291,45 @@ function renderNotif() {
      <div style="display:flex;gap:6px;"><button class="btn-sm btn-ghost" onclick="testNotif(${n.id})">🧪 ทดสอบ</button>
      <button class="btn-sm btn-ghost" onclick="delNotif(${n.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มีกลุ่ม</p>';
 }
+
+// ---------- Webhooks ภายนอก ----------
+let WH_EVENTS = ['sos','incident','incident_resolved','visit','missed_cp','shift','report'];
+async function loadWebhooks() {
+  try {
+    const j = await api('/api/admin/webhooks');
+    WH_EVENTS = j.events || WH_EVENTS;
+    const evBox = $('wh-events');
+    if (evBox && !evBox.dataset.built) {
+      evBox.dataset.built = '1';
+      evBox.innerHTML = WH_EVENTS.map(e => `<label style="margin-right:10px;"><input type="checkbox" value="${e}" checked> ${e}</label>`).join('') +
+        '<label style="margin-left:10px;"><input type="checkbox" value="*"> ทั้งหมด (*)</label>';
+    }
+    $('wh-list').innerHTML = (j.webhooks || []).map(w =>
+      `<div class="cp-item"><div><b>${w.label}</b> <span class="tag ${w.active ? 'tag-ok' : 'tag-warn'}">${w.active ? 'เปิดใช้งาน' : 'ปิด'}</span><br>
+       <span class="muted" style="word-break:break-all;">${w.url}</span><br>
+       <span class="muted">events: ${w.events} · ส่งแล้ว ${w.deliveries} (สำเร็จ ${w.ok_count})</span></div>
+       <div style="display:flex;gap:6px;">
+         <button class="btn-sm btn-ghost" onclick="testWebhook(${w.id})">🧪 ทดสอบ</button>
+         <button class="btn-sm btn-ghost" onclick="toggleWebhook(${w.id}, ${w.active ? 0 : 1})">${w.active ? 'ปิด' : 'เปิด'}</button>
+         <button class="btn-sm btn-ghost" onclick="delWebhook(${w.id})">ลบ</button></div></div>`).join('') || '<p class="muted">ยังไม่มี webhook</p>';
+    const lg = await api('/api/admin/webhooks/deliveries');
+    $('wh-log').innerHTML = (lg.deliveries || []).map(d =>
+      `<div class="cp-item"><div><span class="tag ${d.ok ? 'tag-ok' : 'tag-warn'}">${d.ok ? 'สำเร็จ' : 'ล้มเหลว'}</span>
+       <b>${d.event}</b> <span class="muted">webhook #${d.webhook_id} · ${d.ts} · ${d.attempts} ครั้ง · ${d.detail || ''} ${d.status_code ? '(http ' + d.status_code + ')' : ''}</span></div></div>`).join('') || '<p class="muted">ยังไม่มีการส่ง</p>';
+  } catch (e) { /* tab may not exist */ }
+}
+async function addWebhook() {
+  try {
+    const events = [...document.querySelectorAll('#wh-events input:checked')].map(i => i.value);
+    await api('/api/admin/webhooks', { label: $('wh-label').value.trim(), url: $('wh-url').value.trim(),
+      secret: $('wh-secret').value.trim(), events });
+    toast('บันทึก webhook แล้ว 🌐'); $('wh-label').value = ''; $('wh-url').value = ''; $('wh-secret').value = '';
+    await loadWebhooks();
+  } catch (e) { toast(e.message); }
+}
+async function delWebhook(id) { if (!confirm('ลบ webhook นี้?')) return; try { await api(`/api/admin/webhooks/${id}`, null, 'DELETE'); await loadWebhooks(); } catch (e) { toast(e.message); } }
+async function toggleWebhook(id, active) { try { await api(`/api/admin/webhooks/${id}`, { active: !!active }, 'PUT'); await loadWebhooks(); } catch (e) { toast(e.message); } }
+async function testWebhook(id) { try { const j = await api(`/api/admin/webhooks/${id}/test`, {}); toast(j.ok ? '🧪 ส่งทดสอบสำเร็จ ✅' : '🧪 ส่งไม่สำเร็จ — ดูในบันทึกการส่ง'); await loadWebhooks(); } catch (e) { toast(e.message); } }
 
 // ---------- ผู้ใช้ ----------
 const ROLE_LABEL = { guard: '🚶 รปภ.', supervisor: '👮 หัวหน้า รปภ.', resident: '🏠 ลูกบ้าน', admin: '🛠️ Admin' };
