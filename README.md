@@ -75,6 +75,9 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 - เอกสาร API: หน้า `📖 /docs.html` + สเปก OpenAPI ที่ `/api/openapi.json`
 - 📅 สรุปรายสัปดาห์อัตโนมัติทุกวันจันทร์ 08:00 น. ส่งเข้ากลุ่มแจ้งเตือน
 
+## 🤖 CI (GitHub Actions)
+`.github/workflows/test.yml` — ทุก push/PR รัน `npm ci` + `npm test` (37 เคส) + syntax check อัตโนมัติ ✅
+
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
 npm test     # 37 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
