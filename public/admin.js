@@ -30,8 +30,24 @@ async function doLogin() {
       });
       $('tab-live').querySelector('.card b').textContent = '🟢 ตำแหน่ง รปภ. แบบเรียลไทม์ (มุมมองหัวหน้า)';
     }
-    await loadAll(); initLiveMap(); connectWS();
+    await loadAll(); initLiveMap(); connectWS(); initPush();
   } catch (e) { toast(e.message); }
+}
+
+// ---------- Web Push ----------
+async function initPush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const key = await (await fetch('/api/push/vapid-key')).json();
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64(key.publicKey) });
+    await api('/api/push/subscribe', { subscription: sub.toJSON() });
+    console.log('[push] subscribed');
+  } catch (e) { console.warn('[push]', e.message); }
+}
+function urlB64(k) {
+  const pad = '='.repeat((4 - (k.length % 4)) % 4);
+  return (k + pad).replace(/-/g, '+').replace(/_/g, '/');
 }
 
 function switchTab(tab, btn) {
@@ -446,4 +462,9 @@ async function restoreBackup() {
     catch (e) { toast(e.message); }
   };
   f.click();
+}
+
+async function testPush() {
+  try { const j = await api('/api/admin/push/test', {}); toast('🔔 ส่งทดสอบแล้ว — clients ที่สมัคร: ' + j.subs); }
+  catch (e) { toast(e.message); }
 }

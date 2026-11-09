@@ -283,8 +283,8 @@ test('QR หมดอายุ (qr_ttl_hours) → 410', async () => {
 });
 
 test('session TTL: ตั้ง session_ttl_hours เล็กจิ๋ว → token เดิมหมดอายุ (401) แต่ token ใหม่ใช้ได้', async () => {
-  await api('PUT', '/api/admin/settings', { session_ttl_hours: '0.00001' }, adminTok);
-  await new Promise(r => setTimeout(r, 1500)); // รอให้หมดอายุ (0.00001 ชม. ≈ 0.036 วินาที)
+  await api('PUT', '/api/admin/settings', { session_ttl_hours: '0.001' }, adminTok); // ≈ 3.6 วินาที
+  await new Promise(r => setTimeout(r, 4500)); // รอให้ token เดิมหมดอายุ
   const r = await api('GET', '/api/admin/overview', null, adminTok);
   assert.equal(r.status, 401);
   // ล็อกอินใหม่ได้ (ttl ยัง active แต่ token ใหม่ยังไม่หมดอายุทันที)
@@ -300,6 +300,20 @@ test('auto-close: endpoint ทำงานและคืนจำนวนท�
   const r = await api('POST', '/api/admin/auto-close', {}, a2.j.token);
   assert.equal(r.status, 200);
   assert.ok('closed' in r.j);
+});
+
+
+test('web push: vapid key ออกได้ + subscribe บันทึก + test endpoint', async () => {
+  const k = await api('GET', '/api/push/vapid-key');
+  assert.equal(k.status, 200);
+  assert.ok(k.j.publicKey.length > 50);
+  const g2 = await api('POST', '/api/login', { name: 'สมชาย', pin: '1234' });
+  const sub = await api('POST', '/api/push/subscribe', { subscription: { endpoint: 'https://push.example/fake', keys: { p256dh: 'x', auth: 'y' } } }, g2.j.token);
+  assert.equal(sub.status, 200);
+  const a2 = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const t = await api('POST', '/api/admin/push/test', {}, a2.j.token);
+  assert.equal(t.status, 200);
+  assert.ok(t.j.subs >= 1);
 });
 
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
