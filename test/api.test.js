@@ -579,6 +579,19 @@ test('SOS สำรองทาง SMS gateway: ตั้งค่าแล้�
   } finally { srv.close(); }
 });
 
+test('migration SQL ครบทุกตารางตาม db.js + deploy doc มีครบ', async () => {
+  const dbjs = fs.readFileSync(path.join(__dirname, '..', 'server', 'db.js'), 'utf8');
+  const tables = [...dbjs.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map(m => m[1]);
+  assert.ok(tables.length >= 15, 'db.js ต้องมีอย่างน้อย 15 ตาราง, ได้ ' + tables.length);
+  const sql = fs.readFileSync(path.join(__dirname, '..', 'scripts', 'migrate-to-postgres.sql'), 'utf8');
+  for (const t of tables) assert.ok(sql.includes('CREATE TABLE IF NOT EXISTS ' + t), 'migration SQL ขาดตาราง ' + t);
+  for (const col of ['site_id', 'qr_issued_at', 'require_two_person', 'flags', 'status', 'secret', 'events'])
+    assert.ok(sql.includes(col), 'migration SQL ขาดคอลัมน์ ' + col);
+  const dep = fs.readFileSync(path.join(__dirname, '..', 'docs', 'deploy.md'), 'utf8');
+  for (const kw of ['docker compose', 'certbot', 'migrate-to-postgres.sql', 'DATABASE_URL', 'SGT_SECRET'])
+    assert.ok(dep.includes(kw), 'deploy.md ขาดหัวข้อ ' + kw);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
