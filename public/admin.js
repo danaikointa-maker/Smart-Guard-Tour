@@ -251,7 +251,12 @@ async function openReport(id) {
       <p><b>เช็คจุดสำเร็จ ${d.checkpoints_visited}/${d.checkpoints_total} จุด</b> · จุด GPS ${d.gps_points} จุด</p>
       <p class="muted">เริ่ม ${d.started_at || d.checked_in_at} — จบ ${d.checked_out_at}</p>
       <table><tr><th>จุด</th><th>เวลา</th><th>ความแม่นยำ</th></tr>
-      ${d.visits.map(v => `<tr><td>${v.code} ${v.name}</td><td>${(v.ts || '').slice(11, 19)}</td><td>±${Math.round(v.accuracy || 0)} ม.</td></tr>`).join('')}
+      ${d.visits.map(v => {
+        let fl = [];
+        try { fl = JSON.parse(v.flags || '[]'); } catch (e) {}
+        const badge = fl.length ? ` <span class="tag tag-warn">🤖 ${fl.map(f => ({ dark: 'มืด', blurry: 'เบลอ', lowres: 'ความละเอียดต่ำ' }[f]) || f).join(', ')}</span>` : '';
+        return `<tr><td>${v.code} ${v.name}${badge}</td><td>${(v.ts || '').slice(11, 19)}</td><td>±${Math.round(v.accuracy || 0)} ม.</td></tr>`;
+      }).join('')}
       </table>
       <h2 style="margin-top:12px;">รูปถ่าย</h2>
       <div class="photo-grid">${d.visits.filter(v => v.photo).map(v => `<img src="${v.photo}">`).join('') || '<p class="muted">ไม่มีรูป</p>'}</div>`;

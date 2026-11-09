@@ -475,6 +475,33 @@ test('เส้นทางไดนามิก: unvisited ก่อน + boost
   assert.ok(lastUnvisited >= 0 && r2route.slice(lastUnvisited + 1).every(x => x.visited), 'unvisited ทั้งหมดต้องมาก่อน visited ทั้งหมด');
 });
 
+test('AI ตรวจรูปอัตโนมัติ: visit ส่ง flags ได้ + เก็บใน DB + sync ออฟไลน์ก็เก็บ flags', async () => {
+  const g = await api('POST', '/api/login', { name: 'วินัย', pin: '1234' });
+  assert.equal(g.status, 200);
+  const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const ov = await api('GET', '/api/admin/overview', null, a.j.token);
+  const qr = ov.j.posts[0].qr;
+  const cp = ov.j.checkpoints[0];
+  const ci = await api('POST', '/api/guard/checkin', { qr }, g.j.token);
+  assert.equal(ci.status, 200);
+  await api('POST', '/api/guard/start', { shiftId: ci.j.shift.id }, g.j.token);
+  const v = await api('POST', '/api/guard/visit', {
+    shiftId: ci.j.shift.id, checkpointId: cp.id, lat: cp.lat, lng: cp.lng, accuracy: 5,
+    photo: TINY_JPG, flags: ['dark', 'blurry', 'not-a-real-flag'],
+  }, g.j.token);
+  assert.equal(v.status, 200);
+  assert.ok(v.j.visit.flags.includes('dark') && v.j.visit.flags.includes('blurry'), 'ต้องเก็บเฉพาะ flag ที่รู้จัก');
+  assert.ok(!v.j.visit.flags.includes('not-a-real-flag'));
+  // sync path
+  const sync = await api('POST', '/api/guard/sync', {
+    visits: [{ checkpointId: ov.j.checkpoints[1].id, lat: ov.j.checkpoints[1].lat, lng: ov.j.checkpoints[1].lng, flags: ['lowres'] }],
+  }, g.j.token);
+  assert.equal(sync.status, 200);
+  const det = await api('GET', `/api/guard/shift/${ci.j.shift.id}`, null, g.j.token);
+  const synced = det.j.visits.find(x => x.checkpointId === ov.j.checkpoints[1].id || x.checkpoint_id === ov.j.checkpoints[1].id);
+  assert.ok(synced && JSON.parse(synced.flags || '[]').includes('lowres'), 'sync ต้องเก็บ flags ด้วย');
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
