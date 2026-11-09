@@ -415,6 +415,20 @@ test('แดชบอร์ดสาธารณะ: ไม่ต้องล็
   assert.equal(p3.status, 200);
 });
 
+test('NFC แทน QR: หน้า รปภ. มีปุ่ม Web NFC + รหัส QR เดียวกันเช็คอินได้ (รองรับการ์ด NFC)', async () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'guard.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'guard.js'), 'utf8');
+  assert.ok(html.includes('btn-nfc-in') && html.includes('btn-nfc-out'), 'ต้องมีปุ่ม NFC ทั้งเช็คอินและเช็คเอาต์');
+  assert.ok(js.includes('NDEFReader') && js.includes('tapNFC'), 'ต้องมีโค้ด Web NFC');
+  // การ์ด NFC เก็บข้อความเดียวกับ QR → ใช้ checkin ได้เหมือนสแกน QR
+  const g = await api('POST', '/api/login', { name: 'วินัย', pin: '1234' });
+  assert.equal(g.status, 200);
+  const ov = await api('GET', '/api/admin/overview', null, (await api('POST', '/api/login', { name: 'admin', pin: 'admin123' })).j.token);
+  const qr = ov.j.posts[0].qr; // สตริงเดียวกับที่เขียนลงการ์ด NFC
+  const ci = await api('POST', '/api/guard/checkin', { qr }, g.j.token);
+  assert.equal(ci.status, 200, 'เช็คอินด้วยรหัสจากการ์ด NFC ต้องผ่าน');
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {

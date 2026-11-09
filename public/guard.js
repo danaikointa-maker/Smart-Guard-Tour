@@ -56,6 +56,35 @@ function stopScan() { if (S.scanTimer) cancelAnimationFrame(S.scanTimer); S.scan
   if (S.camStream) { S.camStream.getTracks().forEach(t => t.stop()); S.camStream = null; } }
 
 function goScanIn() { show('scr-scanin'); $('scanin-status').textContent = 'กำลังมองหา QR…'; openCam('cam-in', (qr) => doCheckin(qr)); }
+
+// ---------- NFC (Web NFC) — แทนการสแกน QR เมื่อสติกเกอร์ QR เสียหาย/แสงไม่ดี ----------
+// การ์ด NFC เก็บข้อความเดียวกับ QR: SGT1:P:{postId}:{nonce}:{hmac}
+function nfcSupported() { return 'NDEFReader' in window; }
+function initNFC() {
+  if (!nfcSupported()) return;
+  $('btn-nfc-in') && $('btn-nfc-in').classList.remove('hidden');
+  $('btn-nfc-out') && $('btn-nfc-out').classList.remove('hidden');
+  $('nfc-hint-in') && $('nfc-hint-in').classList.remove('hidden');
+}
+async function tapNFC(mode) {
+  if (!nfcSupported()) return toast('เครื่องนี้ไม่รองรับ Web NFC (ใช้ Chrome บน Android + HTTPS)');
+  const statusEl = mode === 'in' ? $('scanin-status') : $('scanout-status');
+  try {
+    const reader = new NDEFReader();
+    await reader.scan();
+    statusEl.textContent = '📲 แตะการ์ด NFC ที่ป้อม…';
+    toast('📲 แตะการ์ด NFC ที่ป้อมตอนนี้');
+    reader.onreading = (ev) => {
+      const rec = ev.message.records[0];
+      const qr = new TextDecoder().decode(rec.data).trim();
+      if (!qr.startsWith('SGT1:')) return toast('การ์ดนี้ไม่ใช่ของระบบ Smart Guard Tour');
+      if (mode === 'in') doCheckin(qr); else doCheckout(qr);
+    };
+    reader.onreadingerror = () => toast('อ่านการ์ดไม่สำเร็จ — ลองแตะอีกครั้ง');
+  } catch (e) {
+    toast('NFC: ' + (e.name === 'NotAllowedError' ? 'ต้องอนุญาตสิทธิ์ NFC ก่อน (แตะปุ่มแล้วแตะการ์ด)' : e.message));
+  }
+}
 async function manualCheckin() { const v = $('qr-manual-in').value.trim(); if (v) doCheckin(v); }
 async function doCheckin(qr) {
   try {
@@ -265,6 +294,7 @@ async function doCheckout(qr) {
 }
 
 $('lg-name').focus();
+initNFC();
 
 // ---------- แจ้งเหตุการณ์ ----------
 let incPhoto = null;

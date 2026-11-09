@@ -34,6 +34,8 @@
       <p class="muted">หากสแกนไม่ได้ พิมพ์รหัส QR ด้วยตนเอง:</p>
       <input id="qr-manual-in" placeholder="SGT1:P:..." style="margin-bottom:10px;">
       <button class="btn-ghost" onclick="manualCheckin()">เช็คอินด้วยรหัส</button>
+      <button id="btn-nfc-in" class="btn-ghost hidden" style="margin-top:8px;width:100%;" onclick="tapNFC('in')">📲 แตะการ์ด NFC ที่ป้อม (แทน QR)</button>
+      <p id="nfc-hint-in" class="muted hidden" style="margin-top:6px;">ต้องใช้ Chrome บน Android + HTTPS — แตะแล้วแตะการ์ดที่ป้อม</p>
     </div>
   </div>
 
@@ -73,6 +75,7 @@
     <div class="card">
       <input id="qr-manual-out" placeholder="SGT1:P:..." style="margin-bottom:10px;">
       <button class="btn-ghost" onclick="manualCheckout()">จบงานด้วยรหัส</button>
+      <button id="btn-nfc-out" class="btn-ghost hidden" style="margin-top:8px;width:100%;" onclick="tapNFC('out')">📲 แตะการ์ด NFC ที่ป้อม (แทน QR)</button>
     </div>
   </div>
 
