@@ -429,6 +429,52 @@ test('NFC แทน QR: หน้า รปภ. มีปุ่ม Web NFC + ร
   assert.equal(ci.status, 200, 'เช็คอินด้วยรหัสจากการ์ด NFC ต้องผ่าน');
 });
 
+test('เส้นทางไดนามิก: unvisited ก่อน + boost จุดใกล้เหตุการณ์ + เรียงตามระยะทาง', async () => {
+  const g = await api('POST', '/api/login', { name: 'วันดี', pin: '1234' });
+  assert.equal(g.status, 200);
+  const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  const ov = await api('GET', '/api/admin/overview', null, a.j.token);
+  const qr = ov.j.posts[0].qr;
+  const cps = ov.j.checkpoints;
+  assert.ok(cps.length >= 2, 'ต้องมีอย่างน้อย 2 จุดตรวจ');
+  const near = cps[0];
+  // resolve เหตุการณ์เปิดเก่าทั้งหมด (จากเทสก่อนหน้า) ไม่งั้นทุกจุดจะถูก boost
+  for (const inc of ov.j.incidents || []) {
+    if (inc.status === 'open') await api('POST', `/api/admin/incidents/${inc.id}/resolve`, {}, a.j.token);
+  }
+  // สร้างจุดใหม่ไกล ~1.3 กม. + เหตุการณ์ตรงนั้น → ต้องถูก boost ขึ้นเป็นลำดับ 1 แม้จะไกลสุด
+  await api('POST', '/api/admin/checkpoints', { name: 'จุดไกล', lat: near.lat + 0.012, lng: near.lng + 0.012, radius: 50 }, a.j.token);
+  const ci = await api('POST', '/api/guard/checkin', { qr }, g.j.token);
+  assert.equal(ci.status, 200);
+  await api('POST', '/api/guard/start', { shiftId: ci.j.shift.id }, g.j.token);
+  await api('POST', '/api/guard/position', { shiftId: ci.j.shift.id, lat: near.lat, lng: near.lng, accuracy: 5 }, g.j.token);
+  await api('POST', '/api/guard/incident', { type: 'route-boost', description: 'x', lat: near.lat + 0.012, lng: near.lng + 0.012 }, g.j.token);
+  const r1 = await api('GET', '/api/guard/route', null, g.j.token);
+  assert.equal(r1.status, 200);
+  const farId = r1.j.route.find(x => x.name === 'จุดไกล').id;
+  assert.equal(r1.j.route[0].id, farId, 'จุดใกล้เหตุการณ์ต้องมาก่อน แม้จะไกลสุด');
+  assert.equal(r1.j.route[0].incident_near, true);
+  // unvisited ทั้งหมดต้องมาก่อน visited + ที่เหลือเรียงจากใกล้ไปไกล
+  const route = r1.j.route;
+  const firstVisited = route.findIndex(x => x.visited);
+  if (firstVisited >= 0) {
+    assert.ok(route.slice(0, firstVisited).every(x => !x.visited), 'unvisited ต้องมาก่อน');
+    assert.ok(route.slice(firstVisited).every(x => x.visited), 'visited ต้องอยู่ท้าย');
+  }
+  const rest = route.slice(1).filter(x => !x.visited);
+  for (let i = 1; i < rest.length; i++) assert.ok(rest[i].dist >= rest[i - 1].dist, 'ต้องเรียงตามระยะทาง');
+  // เช็คจุดแรกของลิสต์แล้ว → ต้องหล่นไปท้าย
+  const first = rest[0];
+  const cpInfo = cps.find(c => c.id === first.id) || first;
+  await api('POST', '/api/guard/visit', { shiftId: ci.j.shift.id, checkpointId: first.id, lat: cpInfo.lat, lng: cpInfo.lng, accuracy: 5 }, g.j.token);
+  const r2 = await api('GET', '/api/guard/route', null, g.j.token);
+  const mine = r2.j.route.find(x => x.id === first.id);
+  assert.ok(mine && mine.visited, 'จุดที่เพิ่งเช็คต้องติด flag visited');
+  const r2route = r2.j.route;
+  const lastUnvisited = r2route.map(x => !x.visited).lastIndexOf(true);
+  assert.ok(lastUnvisited >= 0 && r2route.slice(lastUnvisited + 1).every(x => x.visited), 'unvisited ทั้งหมดต้องมาก่อน visited ทั้งหมด');
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {

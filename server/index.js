@@ -712,6 +712,29 @@ app.get('/api/resident/status', auth, (req, res) => {
   res.json({ see_status: true, see_live_location: seeLive, see_history: seeHistory, shifts });
 });
 
+// ---------- รปภ.: เส้นทางตรวจแบบไดนามิก (dynamic route) ----------
+// เรียงจุดตรวจ: ยังไม่เช็คมาก่อน → boost จุดที่ใกล้เหตุการณ์เปิดอยู่ (<300ม.) → ใกล้ที่สุดก่อน
+app.get('/api/guard/route', auth, (req, res) => {
+  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
+  if (!s) return res.status(404).json({ error: 'ไม่มีกะที่กำลังตรวจ' });
+  const pos = db.prepare('SELECT lat,lng FROM gps_tracks WHERE shift_id=? ORDER BY id DESC LIMIT 1').get(s.id)
+    || (req.query.lat && req.query.lng ? { lat: +req.query.lat, lng: +req.query.lng } : null);
+  const cps = db.prepare('SELECT * FROM checkpoints WHERE COALESCE(site_id,0)=COALESCE((SELECT site_id FROM posts WHERE id=?),0) ORDER BY seq').all(s.post_id);
+  const visited = new Set(db.prepare('SELECT checkpoint_id FROM visits WHERE shift_id=? AND inside=1').all(s.id).map(v => v.checkpoint_id));
+  const openInc = db.prepare("SELECT lat,lng FROM incidents WHERE status='open' AND lat IS NOT NULL").all();
+  const items = cps.map(cp => {
+    const d = pos ? haversineM(pos.lat, pos.lng, cp.lat, cp.lng) : null;
+    const nearInc = openInc.some(i => haversineM(i.lat, i.lng, cp.lat, cp.lng) < 300);
+    return { id: cp.id, code: cp.code, name: cp.name, seq: cp.seq, dist: d === null ? null : Math.round(d), visited: visited.has(cp.id), incident_near: nearInc };
+  });
+  items.sort((a, b) => {
+    if (a.visited !== b.visited) return a.visited ? 1 : -1;
+    if (a.incident_near !== b.incident_near) return a.incident_near ? -1 : 1;
+    return (a.dist ?? 1e9) - (b.dist ?? 1e9);
+  });
+  res.json({ shift_id: s.id, from: pos, route: items.map((x, i) => ({ ...x, order: i + 1 })) });
+});
+
 // ---------- รปภ.: ปุ่ม SOS ฉุกเฉิน ----------
 async function raiseSOS(user, shiftId, lat, lng) {
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, user.userId);
