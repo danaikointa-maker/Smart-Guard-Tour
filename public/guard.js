@@ -7,7 +7,7 @@ const show = (id) => { document.querySelectorAll('.container > div').forEach(d =
 
 const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: null, post: null,
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
-  cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null,
+  cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null, routeOrder: new Map(), lastRoute: 0,
   cfg: { gps_interval_sec: 4 }, pending: new Set(), batt: null,
   queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]') };
 
@@ -103,7 +103,7 @@ async function doCheckin(qr) {
 async function startShift() {
   try {
     await api('/api/guard/start', { shiftId: S.shift.id });
-    connectWS(); startGPS(); initBattery(); initMap(); renderCpList(); show('scr-patrol'); flushQueue();
+    connectWS(); startGPS(); initBattery(); initMap(); renderCpList(); show('scr-patrol'); flushQueue(); loadRoute();
     toast('เริ่มติดตาม GPS แล้ว 📍');
   } catch (e) { toast(e.message); }
 }
@@ -124,6 +124,7 @@ function startGPS() {
     updateMap(); renderCpList();
     const t = Date.now();
     if (t - S.lastSent > (Number(S.cfg.gps_interval_sec) || 4) * 1000) { S.lastSent = t; sendPos(); }
+    if (t - S.lastRoute > 15000) { S.lastRoute = t; loadRoute(); }
   }, (e) => toast('GPS: ' + e.message), { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
 }
 function sendPos() {
@@ -167,6 +168,16 @@ async function flushQueue() {
 }
 window.addEventListener('online', flushQueue);
 
+// ---------- เส้นทางตรวจแบบไดนามิก ----------
+async function loadRoute() {
+  if (!S.shift) return;
+  try {
+    const j = await apiGet('/api/guard/route');
+    S.routeOrder = new Map(j.route.map(r => [r.id, r.order]));
+    renderCpList();
+  } catch (e) {}
+}
+
 // ---------- แผนที่ ----------
 function initMap() {
   if (S.map) return;
@@ -193,13 +204,19 @@ function hav(a, b, c, d) { const R = 6371000, r = x => x * Math.PI / 180;
 function renderCpList() {
   const el = $('cp-list'); el.innerHTML = '';
   let done = 0;
-  for (const cp of [...S.checkpoints].sort((a, b) => a.seq - b.seq)) {
-    const d = distTo(cp); const isDone = S.visits.has(cp.id);
+  const ordered = [...S.checkpoints].sort((a, b) => {
+    const oa = S.routeOrder.get(a.id), ob = S.routeOrder.get(b.id);
+    if (oa != null || ob != null) return (oa ?? 999) - (ob ?? 999);
+    return a.seq - b.seq;
+  });
+  for (const cp of ordered) {
+    const ord = S.routeOrder.get(cp.id);
+    const d = distTo(cp); const isDone = S.visits.has(cp.id); const isPending = S.pending.has(cp.id);
     if (isDone) done++;
     const near = d !== null && d <= cp.radius;
     const div = document.createElement('div');
     div.className = 'cp-item' + (isDone ? ' done' : near ? ' near' : ' far');
-    div.innerHTML = `<div style="flex:2;"><b>${cp.code}</b> ${cp.name}<br>
+    div.innerHTML = `<div style="flex:2;"><b>${cp.code}</b> ${cp.name}${ord ? ` <span class="tag tag-info">🧭 #${ord}</span>` : ''}<br>
       <span class="muted">รัศมี ${cp.radius} ม. · ${isPending ? '<span class="tag tag-warn">⏳ รอคนที่ 2</span>' : isDone ? '<span class="tag tag-ok">✓ เช็คแล้ว</span>' : ''}</span></div>
       <div class="dist">${d === null ? '…' : d + ' ม.'}</div>
       ${isDone ? '' : `<button class="btn-sm btn-${near ? 'ok' : 'ghost'}" ${near ? '' : 'disabled'}
