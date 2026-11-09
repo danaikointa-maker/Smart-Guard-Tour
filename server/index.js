@@ -1001,6 +1001,29 @@ app.post('/api/admin/restore', auth, (req, res) => {
 });
 
 // ---------- admin: ส่งออกสถิติเป็น Excel ----------
+// ---------- admin: สถิติราย รปภ. + streak (gamification แบบ aggregate ปลอดภัย) ----------
+app.get('/api/admin/guard-stats', auth, (req, res) => {
+  if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const guards = db.prepare("SELECT id,name FROM users WHERE role='guard' ORDER BY name").all();
+  const rows = guards.map(g => {
+    const shifts = db.prepare('SELECT COUNT(*) c FROM shifts WHERE guard_id=?').get(g.id).c;
+    const done = db.prepare("SELECT COUNT(*) c FROM shifts WHERE guard_id=? AND status='checked_out'").get(g.id).c;
+    const vOk = db.prepare("SELECT COUNT(*) c FROM visits v JOIN shifts s ON s.id=v.shift_id WHERE s.guard_id=? AND v.inside=1").get(g.id).c;
+    const vOut = db.prepare("SELECT COUNT(*) c FROM visits v JOIN shifts s ON s.id=v.shift_id WHERE s.guard_id=? AND v.inside=0").get(g.id).c;
+    const sos = db.prepare("SELECT COUNT(*) c FROM audit_logs WHERE actor=? AND action='sos'").get(g.name).c;
+    // streak: วันติดต่อกัน (ย้อนหลังจากวันนี้) ที่มีกะ
+    const days = db.prepare("SELECT DISTINCT substr(checked_in_at,1,10) d FROM shifts WHERE guard_id=? ORDER BY d DESC").all(g.id).map(r => r.d);
+    let streak = 0;
+    const today = new Date().toISOString().slice(0, 10);
+    let cursor = today;
+    const set = new Set(days);
+    while (set.has(cursor)) { streak++; const d = new Date(cursor + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() - 1); cursor = d.toISOString().slice(0, 10); }
+    const last = db.prepare('SELECT MAX(checked_in_at) t FROM shifts WHERE guard_id=?').get(g.id).t;
+    return { id: g.id, name: g.name, shifts, shifts_done: done, visits_ok: vOk, visits_outside: vOut, sos, streak, last_shift: last };
+  }).sort((a, b) => b.visits_ok - a.visits_ok || b.streak - a.streak);
+  res.json({ guards: rows });
+});
+
 app.get('/api/admin/stats/export.xlsx', auth, async (req, res) => {
   if (!canView(req.user)) return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
   const s = db.prepare('SELECT 1').get(); // reuse stats logic inline

@@ -396,6 +396,16 @@ async function saveSettings() {
 }
 
 // ---------- สถิติ ----------
+async function loadGuardStats() {
+  try {
+    const g = await api('/api/admin/guard-stats');
+    const medal = ['🥇','🥈','🥉'];
+    $('guard-stats').innerHTML = (g.guards || []).map((x, i) =>
+      `<div class="cp-item"><div><b>${medal[i] || '·'} ${x.name}</b><br>
+       <span class="muted">กะ ${x.shifts} (จบ ${x.shifts_done}) · เช็คสำเร็จ ${x.visits_ok} จุด · นอกรัศมี ${x.visits_outside} · SOS ${x.sos}</span></div>
+       <div><span class="tag tag-ok">🔥 ${x.streak} วัน</span></div></div>`).join('') || '<p class="muted">ยังไม่มีข้อมูล</p>';
+  } catch (e) {}
+}
 async function loadStats() {
   try {
     const s = await api('/api/admin/stats');
@@ -439,7 +449,7 @@ function renderAudit() {
         if (!['live', 'reports', 'stats', 'audit'].includes(b.dataset.tab)) b.classList.add('hidden');
       });
     }
-    renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderUsers(); renderSchedules(); renderSettings(); renderAudit(); loadStats();
+    renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderUsers(); renderSchedules(); renderSettings(); renderAudit(); loadStats(); loadGuardStats();
     initLiveMap(); connectWS();
   } catch (e) { localStorage.removeItem('sgt_admin_token'); localStorage.removeItem('sgt_admin_role'); }
 })();
