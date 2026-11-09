@@ -3,7 +3,7 @@ const $ = (id) => document.getElementById(id);
 const toast = (m) => { const t = $('toast'); t.textContent = m; t.style.display = 'block';
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); };
 const S = { token: localStorage.getItem('sgt_admin_token') || '', data: null, ws: null,
-  mapLive: null, mapManage: null, markers: {}, polylines: {}, clickTarget: null };
+  mapLive: null, mapManage: null, markers: {}, polylines: {}, clickTarget: null, batt: {} };
 
 async function api(path, body, method) {
   const r = await fetch(path, { method: method || (body ? 'POST' : 'GET'),
@@ -59,6 +59,11 @@ function switchTab(tab, btn) {
 
 async function loadAll() {
   S.data = await api('/api/admin/overview');
+  try {
+    const g = await api('/api/admin/guards-status');
+    S.batt = {};
+    for (const r of g.guards) if (r.battery != null) S.batt[r.shift_id] = { battery: Math.round(r.battery * 100), charging: !!r.charging };
+  } catch (e) {}
   renderPosts(); renderCpsAdmin(); renderQRs(); renderShifts(); renderReports(); renderNotif(); renderLiveList();
 }
 
@@ -92,6 +97,7 @@ function connectWS() {
     else if (m.type === 'incident_resolved') { toast(`✅ เหตุการณ์ #${m.id} แก้แล้วโดย ${m.by}`); loadAll(); }
     else if (m.type === 'visit') toast(`📍 ${m.guard} เช็ค ${m.checkpoint} ${m.inside ? 'สำเร็จ' : '⚠️ นอกรัศมี'}`);
     else if (m.type === 'report') { toast(`📨 รายงานใหม่ #${m.reportId} จาก ${m.guard}`); loadAll(); }
+    else if (m.type === 'battery') { S.batt[m.shiftId] = m; renderLiveList(); }
     else if (m.type === 'shift') { loadAll(); }
   };
   S.ws.onclose = () => setTimeout(connectWS, 3000);
@@ -115,7 +121,9 @@ function renderLiveList() {
   const el = $('live-list'); if (!el) return;
   const rows = Object.entries(S.markers).map(([sid, mk]) => {
     const ll = mk.getLatLng();
-    return `<div class="cp-item"><div><b>กะ #${sid}</b> — ตำแหน่งล่าสุด ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}</div>
+    const b = S.batt[sid];
+    const batt = b ? ` · 🔋 <b style="color:${b.battery <= 20 ? '#ef4444' : '#22c55e'}">${b.battery}%</b>${b.charging ? ' ⚡' : ''}` : '';
+    return `<div class="cp-item"><div><b>กะ #${sid}</b> — ตำแหน่งล่าสุด ${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}${batt}</div>
       <button class="btn-sm btn-ghost" onclick="showTrack(${sid})">🛤️ ดูเส้นทาง</button></div>`;
   });
   el.innerHTML = rows.length ? rows.join('') : '<p class="muted">ยังไม่มี รปภ. กำลังปฏิบัติงาน</p>';

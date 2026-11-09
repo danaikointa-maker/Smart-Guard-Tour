@@ -499,10 +499,11 @@ app.post('/api/guard/start', auth, (req, res) => {
 
 // ---------- guard: บันทึกตำแหน่ง (REST สำรอง) ----------
 app.post('/api/guard/position', auth, (req, res) => {
-  const { shiftId, lat, lng, accuracy } = req.body || {};
+  const { shiftId, lat, lng, accuracy, battery, charging } = req.body || {};
   const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
   if (!s || s.status === 'checked_out') return res.status(400).json({ error: 'กะไม่Active' });
   savePosition(s, lat, lng, accuracy);
+  if (battery != null) saveBattery(req.user.userId, s.id, battery, charging);
   res.json({ ok: true });
 });
 
@@ -512,6 +513,15 @@ function savePosition(shift, lat, lng, accuracy) {
   db.prepare('INSERT INTO gps_tracks(shift_id,lat,lng,accuracy,ts) VALUES(?,?,?,?,?)')
     .run(shift.id, lat, lng, accuracy ?? null, ts);
   broadcast({ type: 'gps', shiftId: shift.id, guard: shift.guard_id, lat, lng, accuracy, ts });
+}
+// ---------- สถานะเครื่อง (แบต) ล่าสุดของ รปภ. ----------
+function saveBattery(userId, shiftId, battery, charging) {
+  const b = Number(battery);
+  if (!isFinite(b)) return;
+  const ts = now();
+  db.prepare('INSERT INTO device_status(user_id,battery,charging,ts) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET battery=excluded.battery,charging=excluded.charging,ts=excluded.ts')
+    .run(userId, Math.max(0, Math.min(1, b)), charging ? 1 : 0, ts);
+  broadcast({ type: 'battery', userId, shiftId, battery: Math.round(b * 100), charging: !!charging, ts });
 }
 
 // ---------- guard: ถ่ายรูปเช็คจุดตรวจ + ตรวจ geofence ----------
@@ -674,23 +684,29 @@ app.get('/api/resident/status', auth, (req, res) => {
 });
 
 // ---------- รปภ.: ปุ่ม SOS ฉุกเฉิน ----------
-app.post('/api/guard/sos', auth, async (req, res) => {
-  const { shiftId, lat, lng } = req.body || {};
-  const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, req.user.userId);
-  if (!s) return res.status(404).json({ error: 'ไม่พบกะนี้' });
+async function raiseSOS(user, shiftId, lat, lng) {
+  const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(shiftId, user.userId);
+  if (!s) return null;
   const mapsLink = `https://www.google.com/maps?q=${lat},${lng}`;
-  const text = `🚨 SOS! รปภ. ${req.user.name} แจ้งฉุกเฉิน
+  const text = `🚨 SOS! รปภ. ${user.name} แจ้งฉุกเฉิน
 กะ #${s.id} · ${lat}, ${lng}
 แผนที่: ${mapsLink}
 เวลา ${now()}`;
-  audit(req.user.name, 'sos', { shift: s.id, lat, lng });
-  broadcast({ type: 'sos', guard: req.user.name, shiftId: s.id, lat, lng, ts: now() });
-  sendPush('🚨 SOS ฉุกเฉิน!', `${req.user.name} กด SOS ที่ ${lat}, ${lng}`, { sos: true, shiftId: s.id });
+  audit(user.name, 'sos', { shift: s.id, lat, lng });
+  broadcast({ type: 'sos', guard: user.name, shiftId: s.id, lat, lng, ts: now() });
+  sendPush('🚨 SOS ฉุกเฉิน!', `${user.name} กด SOS ที่ ${lat}, ${lng}`, { sos: true, shiftId: s.id });
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type='sos'").all();
   const sent = [];
   for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { sos: true, shiftId: s.id, lat, lng }));
+  return sent;
+}
+app.post('/api/guard/sos', auth, async (req, res) => {
+  const { shiftId, lat, lng } = req.body || {};
+  const sent = await raiseSOS(req.user, shiftId, lat, lng);
+  if (!sent) return res.status(404).json({ error: 'ไม่พบกะนี้' });
   res.json({ ok: true, sent_to: sent });
 });
+
 
 // ---------- แจ้งเตือน "จุดตรวจที่ยังไม่ถึง" (เช็คทุก 60 วินาที) ----------
 const alertedMissed = new Set();
@@ -759,7 +775,7 @@ app.get('/api/admin/stats', auth, (req, res) => {
 
 // ---------- guard: ซิงก์ออฟไลน์ (คิวในเครื่อง) ----------
 app.post('/api/guard/sync', auth, async (req, res) => {
-  const { positions = [], visits = [] } = req.body || {};
+  const { positions = [], visits = [], sos = [], incidents = [] } = req.body || {};
   const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
   let pOk = 0, vOk = 0, vFail = 0;
   if (s) {
@@ -779,15 +795,24 @@ app.post('/api/guard/sync', auth, async (req, res) => {
       if (inside) vOk++; else vFail++;
     }
   }
-  res.json({ ok: true, positions: pOk, visits_ok: vOk, visits_outside: vFail });
+  let sosOk = 0, incOk = 0;
+  for (const x of sos) {
+    const sent = await raiseSOS(req.user, s ? s.id : x.shiftId, x.lat, x.lng);
+    if (sent) sosOk++;
+  }
+  for (const x of incidents) {
+    if (!x.type) continue;
+    const r = await raiseIncident(req.user, x.type, x.description, x.lat, x.lng, x.accuracy, x.photo);
+    if (r) incOk++;
+  }
+  res.json({ ok: true, positions: pOk, visits_ok: vOk, visits_outside: vFail, sos: sosOk, incidents: incOk });
 });
 
 
 // ---------- รปภ.: แจ้งเหตุการณ์ (ส่งเฉพาะกลุ่มของเหตุการณ์นั้น) ----------
-app.post('/api/guard/incident', auth, async (req, res) => {
-  const { shiftId, type, description, lat, lng, accuracy, photo } = req.body || {};
-  if (!type) return res.status(400).json({ error: 'เลือกประเภทเหตุการณ์' });
-  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(req.user.userId);
+async function raiseIncident(user, type, description, lat, lng, accuracy, photo) {
+  if (!type) return null;
+  const s = db.prepare("SELECT * FROM shifts WHERE guard_id=? AND status IN ('checked_in','patrolling') ORDER BY id DESC LIMIT 1").get(user.userId);
   let photoPath = null;
   if (photo && String(photo).startsWith('data:image')) {
     const buf = Buffer.from(String(photo).split(',')[1], 'base64');
@@ -795,19 +820,26 @@ app.post('/api/guard/incident', auth, async (req, res) => {
   }
   const info = db.prepare(
     'INSERT INTO incidents(shift_id,guard_id,type,description,lat,lng,accuracy,photo,sent_to,ts) VALUES(?,?,?,?,?,?,?,?,?,?)'
-  ).run(s ? s.id : null, req.user.userId, type, description || '', lat ?? null, lng ?? null, accuracy ?? null, photoPath, '', now());
+  ).run(s ? s.id : null, user.userId, type, description || '', lat ?? null, lng ?? null, accuracy ?? null, photoPath, '', now());
   const id = info.lastInsertRowid;
-  const text = `🚨 เหตุการณ์: ${type}\nโดย ${req.user.name}${s ? ' (กะ #' + s.id + ')' : ''}\n${description ?? ''}\n${lat != null ? '📍 ' + lat + ', ' + lng + ' — https://www.google.com/maps?q=$lat,$lng\n' : ''}เวลา ${now()}`;
+  const text = `🚨 เหตุการณ์: ${type}\nโดย ${user.name}${s ? ' (กะ #' + s.id + ')' : ''}\n${description ?? ''}\n${lat != null ? '📍 ' + lat + ', ' + lng + ' — https://www.google.com/maps?q=$lat,$lng\n' : ''}เวลา ${now()}`;
   // ส่งเฉพาะกลุ่มที่ตั้ง event_type = 'incident' หรือ 'incident:<type>'
   const groups = db.prepare("SELECT * FROM notif_groups WHERE event_type IN ('incident','incident:'||?)").all(type);
   const sent = [];
   for (const g of groups) sent.push(`${g.label}(${g.channel}):` + await sendToGroup(g, text, { incidentId: id, type }));
   db.prepare('UPDATE incidents SET sent_to=? WHERE id=?').run(sent.join(',') || 'inbox', id);
-  audit(req.user.name, 'incident', { id, type });
-  broadcast({ type: 'incident', id, guard: req.user.name, incidentType: type, lat, lng, ts: now() });
-  sendPush('🚨 เหตุการณ์ใหม่: ' + type, `${req.user.name}: ${description || ''}`, { incidentId: id, type });
-  res.json({ ok: true, id, sent_to: sent });
+  audit(user.name, 'incident', { id, type });
+  broadcast({ type: 'incident', id, guard: user.name, incidentType: type, lat, lng, ts: now() });
+  sendPush('🚨 เหตุการณ์ใหม่: ' + type, `${user.name}: ${description || ''}`, { incidentId: id, type });
+  return { id, sent_to: sent };
+}
+app.post('/api/guard/incident', auth, async (req, res) => {
+  const { shiftId, type, description, lat, lng, accuracy, photo } = req.body || {};
+  const r = await raiseIncident(req.user, type, description, lat, lng, accuracy, photo);
+  if (!r) return res.status(400).json({ error: 'เลือกประเภทเหตุการณ์' });
+  res.json({ ok: true, id: r.id, sent_to: r.sent_to });
 });
+
 
 
 // ---------- admin: ส่งออกรายงานเป็น Excel (.xlsx) ----------
@@ -1014,6 +1046,18 @@ app.post('/api/admin/push/test', auth, async (req, res) => {
   res.json({ ok: true, subs: db.prepare('SELECT COUNT(*) c FROM push_subs').get().c });
 });
 
+// ---------- admin: สถานะเครื่อง (แบต) ของ รปภ. ที่กำลังปฏิบัติงาน ----------
+app.get('/api/admin/guards-status', auth, (req, res) => {
+  if (req.user.role !== 'admin' && req.user.role !== 'supervisor') return res.status(403).json({ error: 'ไม่มีสิทธิ์' });
+  const rows = db.prepare(`
+    SELECT sh.id shift_id, sh.guard_id, u.name guard_name, sh.status,
+           d.battery, d.charging, d.ts battery_ts
+    FROM shifts sh JOIN users u ON u.id=sh.guard_id
+    LEFT JOIN device_status d ON d.user_id=sh.guard_id
+    WHERE sh.status IN ('checked_in','patrolling') ORDER BY sh.id DESC`).all();
+  res.json({ guards: rows });
+});
+
 // ---------- WebSocket (Realtime ไปหน้า Admin) ----------
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Smart Guard Tour running: http://0.0.0.0:${PORT}`);
@@ -1037,7 +1081,10 @@ wss.on('connection', (ws, req) => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (m.type === 'pos') {
       const s = db.prepare('SELECT * FROM shifts WHERE id=? AND guard_id=?').get(m.shiftId, u.userId);
-      if (s && s.status !== 'checked_out') savePosition(s, m.lat, m.lng, m.accuracy);
+      if (s && s.status !== 'checked_out') {
+        savePosition(s, m.lat, m.lng, m.accuracy);
+        if (m.battery != null) saveBattery(u.userId, s.id, m.battery, m.charging);
+      }
     }
   });
   ws.on('close', () => clients.delete(ws));
