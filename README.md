@@ -73,6 +73,9 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 ## 🚨 วงจรเหตุการณ์ + 🧹 Retention (PDPA)
 เหตุการณ์มีสถานะ open → resolved (admin กด "✔ แก้แล้ว" ในแท็บ 📋, มี realtime broadcast) · ข้อมูล GPS เก่ากว่าที่ตั้งค่า `gps_retention_days` (เริ่มต้น 90 วัน) จะถูกลบอัตโนมัติทุกวัน หรือกดรันเองผ่าน `POST /api/admin/cleanup`
 
+## 📖 OpenAPI
+`docs/openapi.json` (เสิร์ฟที่ `/api/openapi.json` +หน้า `/docs.html`) — อัปเดตครบ **55 paths** รวมทุก endpoint ใหม่ (webhooks, push, route, guard-stats, public summary, SMS settings ฯลฯ)
+
 ## 🛡️ ความปลอดภัย & เอกสาร API
 - Security headers (CSP/X-Frame-Options/nosniff), rate limit หน้า login (10 ครั้ง/5 นาที/IP), health check `GET /api/health`
 - เอกสาร API: หน้า `📖 /docs.html` + สเปก OpenAPI ที่ `/api/openapi.json`

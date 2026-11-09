@@ -5,38 +5,639 @@
     "version": "1.0.0",
     "description": "REST + WebSocket API ของระบบ Smart Guard Tour — ฐานข้อมูลแยกจากระบบ VVA, SSO ผ่าน VVA ได้"
   },
-  "servers": [{ "url": "/" }],
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
   "components": {
     "securitySchemes": {
-      "token": { "type": "apiKey", "in": "header", "name": "x-token" }
+      "token": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-token"
+      }
     }
   },
   "paths": {
-    "/api/health": { "get": { "summary": "Health check", "responses": { "200": { "description": "ok" } } } },
-    "/api/settings": { "get": { "summary": "ค่าตั้งค่าสาธารณะ (ไม่มีความลับ)", "responses": { "200": { "description": "key-value" } } } },
-    "/api/login": { "post": { "summary": "ล็อกอินด้วยชื่อ+PIN (จำกัด 10 ครั้ง/5 นาที/IP)", "requestBody": { "content": { "application/json": { "schema": { "type": "object", "properties": { "name": { "type": "string" }, "pin": { "type": "string" } } } } } }, "responses": { "200": { "description": "ได้ token" }, "401": { "description": "ผิด" }, "429": { "description": "rate limit" } } } },
-    "/api/sso/authorize": { "get": { "summary": "เริ่ม flow SSO (redirect ไป VVA หรือ mock)", "parameters": [{ "name": "name", "in": "query", "schema": { "type": "string" } }] } },
-    "/api/sso/callback": { "get": { "summary": "callback จาก VVA (code+state)" } },
-    "/api/sso/login": { "post": { "summary": "ล็อกอินด้วย vva_token (mock)" } },
-    "/api/guard/checkin": { "post": { "summary": "สแกน QR ที่ป้อม = เช็คอิน (คืนกะ+จุดตรวจ+เวร+เตือนนอกเวร)", "security": [{ "token": [] }] } },
-    "/api/guard/start": { "post": { "summary": "กดเริ่มปฏิบัติงาน → เริ่ม GPS", "security": [{ "token": [] }] } },
-    "/api/guard/position": { "post": { "summary": "รับตำแหน่ง GPS (สำรองของ WS)", "security": [{ "token": [] }] } },
-    "/api/guard/visit": { "post": { "summary": "ถ่ายรูปเช็คจุดตรวจ + geofence (409 ถ้านอกรัศมี, pending ถ้าจุดต้อง 2 คน)", "security": [{ "token": [] }] } },
-    "/api/guard/incident": { "post": { "summary": "แจ้งเหตุการณ์ → ส่งเฉพาะกลุ่มของเหตุการณ์นั้น", "security": [{ "token": [] }] } },
-    "/api/guard/sos": { "post": { "summary": "ปุ่ม SOS ฉุกเฉิน", "security": [{ "token": [] }] } },
-    "/api/guard/sync": { "post": { "summary": "ซิงก์คิวออฟไลน์ (positions/visits)", "security": [{ "token": [] }] } },
-    "/api/guard/checkout": { "post": { "summary": "สแกน QR อีกครั้ง = จบกะ → สร้างรายงาน + แจ้งเตือนกลุ่ม", "security": [{ "token": [] }] } },
-    "/api/resident/status": { "get": { "summary": "ลูกบ้านดูสถานะตามสิทธิ์ (ไม่มี GPS สดถ้าไม่อนุญาต)", "security": [{ "token": [] }] } },
-    "/api/admin/overview": { "get": { "summary": "Admin: ทุกอย่าง (ป้อม/จุด/ผู้ใช้/เวร/ตั้งค่า/แจ้งเตือน/เหตุการณ์/audit)", "security": [{ "token": [] }] } },
-    "/api/admin/stats": { "get": { "summary": "สถิติแดชบอร์ด", "security": [{ "token": [] }] } },
-    "/api/admin/reports/{id}": { "get": { "summary": "รายละเอียดรายงาน", "security": [{ "token": [] }] } },
-    "/api/admin/reports/{id}/export.xlsx": { "get": { "summary": "ดาวน์โหลดรายงานเป็น Excel", "security": [{ "token": [] }] } },
-    "/api/admin/posts": { "post": { "summary": "สร้างป้อม+QR (admin)", "security": [{ "token": [] }] } },
-    "/api/admin/checkpoints": { "post": { "summary": "เพิ่มจุดตรวจ (admin)", "security": [{ "token": [] }] } },
-    "/api/admin/users": { "post": { "summary": "เพิ่มผู้ใช้ (admin)", "security": [{ "token": [] }] } },
-    "/api/admin/settings": { "put": { "summary": "บันทึกตั้งค่า (admin)", "security": [{ "token": [] }] } },
-    "/api/admin/notif": { "post": { "summary": "ตั้งค่ากลุ่มแจ้งเตือน LINE/Telegram/Webhook (admin)", "security": [{ "token": [] }] } },
-    "/api/admin/notif/{id}/test": { "post": { "summary": "ทดสอบส่งเข้ากลุ่ม", "security": [{ "token": [] }] } },
-    "/ws": { "get": { "summary": "WebSocket Realtime: client ส่ง {type:'pos',...}, server broadcast gps/visit/sos/incident/report/shift/missed_cp", "parameters": [{ "name": "token", "in": "query", "schema": { "type": "string" } }] } }
+    "/api/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "ok"
+          }
+        }
+      }
+    },
+    "/api/settings": {
+      "get": {
+        "summary": "ค่าตั้งค่าสาธารณะ (ไม่มีความลับ)",
+        "responses": {
+          "200": {
+            "description": "key-value"
+          }
+        }
+      }
+    },
+    "/api/login": {
+      "post": {
+        "summary": "ล็อกอินด้วยชื่อ+PIN (จำกัด 10 ครั้ง/5 นาที/IP)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "pin": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ได้ token"
+          },
+          "401": {
+            "description": "ผิด"
+          },
+          "429": {
+            "description": "rate limit"
+          }
+        }
+      }
+    },
+    "/api/sso/authorize": {
+      "get": {
+        "summary": "เริ่ม flow SSO (redirect ไป VVA หรือ mock)",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/sso/callback": {
+      "get": {
+        "summary": "callback จาก VVA (code+state)"
+      }
+    },
+    "/api/sso/login": {
+      "post": {
+        "summary": "ล็อกอินด้วย vva_token (mock)"
+      }
+    },
+    "/api/guard/checkin": {
+      "post": {
+        "summary": "สแกน QR ที่ป้อม = เช็คอิน (คืนกะ+จุดตรวจ+เวร+เตือนนอกเวร)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/start": {
+      "post": {
+        "summary": "กดเริ่มปฏิบัติงาน → เริ่ม GPS",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/position": {
+      "post": {
+        "summary": "รับตำแหน่ง GPS (สำรองของ WS)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/visit": {
+      "post": {
+        "summary": "ถ่ายรูปเช็คจุดตรวจ + geofence (409 ถ้านอกรัศมี, pending ถ้าจุดต้อง 2 คน)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/incident": {
+      "post": {
+        "summary": "แจ้งเหตุการณ์ → ส่งเฉพาะกลุ่มของเหตุการณ์นั้น",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/sos": {
+      "post": {
+        "summary": "ปุ่ม SOS ฉุกเฉิน",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/sync": {
+      "post": {
+        "summary": "ซิงก์คิวออฟライン: positions + visits + sos + incidents",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/guard/checkout": {
+      "post": {
+        "summary": "สแกน QR อีกครั้ง = จบกะ → สร้างรายงาน + แจ้งเตือนกลุ่ม",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/resident/status": {
+      "get": {
+        "summary": "ลูกบ้านดูสถานะตามสิทธิ์ (ไม่มี GPS สดถ้าไม่อนุญาต)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/overview": {
+      "get": {
+        "summary": "Admin: ทุกอย่าง (ป้อม/จุด/ผู้ใช้/เวร/ตั้งค่า/แจ้งเตือน/เหตุการณ์/audit)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/stats": {
+      "get": {
+        "summary": "สถิติแดชบอร์ด",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/reports/{id}": {
+      "get": {
+        "summary": "รายละเอียดรายงาน",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/reports/{id}/export.xlsx": {
+      "get": {
+        "summary": "ดาวน์โหลดรายงานเป็น Excel",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/posts": {
+      "post": {
+        "summary": "สร้างป้อม+QR (admin)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/checkpoints": {
+      "post": {
+        "summary": "เพิ่มจุดตรวจ (admin)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/users": {
+      "post": {
+        "summary": "เพิ่มผู้ใช้ (admin)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/settings": {
+      "put": {
+        "summary": "บันทึกตั้งค่า (admin)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/notif": {
+      "post": {
+        "summary": "ตั้งค่ากลุ่มแจ้งเตือน LINE/Telegram/Webhook (admin)",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/admin/notif/{id}/test": {
+      "post": {
+        "summary": "ทดสอบส่งเข้ากลุ่ม",
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/ws": {
+      "get": {
+        "summary": "WebSocket Realtime: client ส่ง {type:'pos',...}, server broadcast gps/visit/sos/incident/report/shift/missed_cp",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/guard/route": {
+      "get": {
+        "summary": "🧭 เส้นทางตรวจไดนามิก (unvisited ก่อน + boost ใกล้เหตุการณ์ + ใกล้สุดก่อน)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/guard/shift/{id}": {
+      "get": {
+        "summary": "รายละเอียดกะของ รปภ. (visits รวม flags รูป)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/guards-status": {
+      "get": {
+        "summary": "สถานะเครื่อง (🔋แบต) ของ รปภ. ที่กำลังปฏิบัติงาน",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/guard-stats": {
+      "get": {
+        "summary": "🏆 สถิติรวม + streak ต่อ รปภ. (เรียงอันดับ)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/webhooks": {
+      "get": {
+        "summary": "🌐 รายการ webhooks ภายนอก",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "post": {
+        "summary": "สร้าง webhook (url/secret/events)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/webhooks/{id}": {
+      "put": {
+        "summary": "แก้ไข webhook",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "delete": {
+        "summary": "ลบ webhook",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/webhooks/{id}/test": {
+      "post": {
+        "summary": "🧪 ส่ง event ทดสอบไป webhook",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/webhooks/deliveries": {
+      "get": {
+        "summary": "📜 บันทึกการส่ง webhook ล่าสุด 100 รายการ",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/push/vapid-key": {
+      "get": {
+        "summary": "🔔 VAPID public key สำหรับ subscribe Web Push",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/push/subscribe": {
+      "post": {
+        "summary": "บันทึก push subscription ของเบราว์เซอร์",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/push/test": {
+      "post": {
+        "summary": "🔔 ยิง push notification ทดสอบไปทุก subscriber",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/public/summary": {
+      "get": {
+        "summary": "🌐 แดชบอร์ดสาธารณะ — ภาพรวมแบบ aggregate ไม่ต้องล็อกอิน (ปิดได้ด้วย setting public_dashboard)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/incidents/{id}/resolve": {
+      "post": {
+        "summary": "admin resolve เหตุการณ์",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/auto-close": {
+      "post": {
+        "summary": "ปิดกะที่ลืมเช็คเอาต์อัตโนมัติ (รันทุก 60 วินาทีอยู่แล้ว)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/posts/{id}/rotate-qr": {
+      "post": {
+        "summary": "🔄 ออก QR ใหม่ให้ป้อม (QR เก่าใช้ไม่ได้)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/backup": {
+      "get": {
+        "summary": "สำรองข้อมูลทั้งระบบ (JSON ทุกตาราง)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/restore": {
+      "post": {
+        "summary": "กู้คืนข้อมูลจากไฟล์สำรอง",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/cleanup": {
+      "post": {
+        "summary": "🧹 ลบ GPS เก่าตาม retention (PDPA)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/sites": {
+      "get": {
+        "summary": "รายการโครงการ (multi-site)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "post": {
+        "summary": "สร้างโครงการใหม่",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/schedules": {
+      "get": {
+        "summary": "ตารางเวร",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "post": {
+        "summary": "เพิ่มตารางเวร",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/schedules/{id}": {
+      "delete": {
+        "summary": "ลบตารางเวร",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/checkpoints/{id}": {
+      "put": {
+        "summary": "แก้ไขจุดตรวจ (เช่น require_two_person)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "delete": {
+        "summary": "ลบจุดตรวจ",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/notif/{id}": {
+      "delete": {
+        "summary": "ลบกลุ่มแจ้งเตือน",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/posts/{id}": {
+      "delete": {
+        "summary": "ลบป้อม",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/users/{id}": {
+      "put": {
+        "summary": "แก้ไขผู้ใช้/เปลี่ยน PIN",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      },
+      "delete": {
+        "summary": "ลบผู้ใช้",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/shift/{id}/track": {
+      "get": {
+        "summary": "เส้นทาง GPS ของกะ",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/admin/stats/export.xlsx": {
+      "get": {
+        "summary": "ส่งออกสถิติเป็น Excel",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/me": {
+      "get": {
+        "summary": "ข้อมูลผู้ใช้ปัจจุบันจาก token",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    },
+    "/api/sso/mock-issue": {
+      "get": {
+        "summary": " mock ออก token VVA (โหมดทดสอบ)",
+        "responses": {
+          "200": {
+            "description": "สำเร็จ"
+          }
+        }
+      }
+    }
   }
 }
