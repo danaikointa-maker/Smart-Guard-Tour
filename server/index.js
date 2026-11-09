@@ -64,6 +64,17 @@ app.get('/api/public/summary', (req, res) => {
   });
 });
 
+// ---------- TWA / Digital Asset Links: assetlinks.json (SHA-256 ของ signing key) ----------
+app.get('/.well-known/assetlinks.json', (req, res) => {
+  const fp = process.env.TWA_SHA256_FINGERPRINT
+    || db.prepare("SELECT value FROM settings WHERE key='twa_sha256_fingerprint'").get()?.value || '';
+  const pkg = process.env.TWA_PACKAGE_ID || 'com.smartguardtour.smart_guard_tour';
+  if (!fp) return res.status(404).json({ error: 'ยังไม่ได้ตั้ง TWA_SHA256_FINGERPRINT — ใส่ SHA-256 ของ signing key (ดูใน Play Console)' });
+  res.json([{ relation: ['delegate_permission/common.handle_all_urls'],
+    target: { namespace: 'android_app', package_name: pkg,
+      sha256_cert_fingerprints: [fp] } }]);
+});
+
 app.get('/api/health', (req, res) => res.json({ ok: true, ts: now(), uptime: process.uptime() }));
 app.get('/api/openapi.json', (req, res) => res.sendFile(path.join(__dirname, '..', 'docs', 'openapi.json')));
 app.use(express.static(path.join(__dirname, '..', 'public')));

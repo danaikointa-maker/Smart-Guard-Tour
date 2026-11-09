@@ -1,0 +1,15 @@
+{
+  "name": "Smart Guard Tour — รปภ.",
+  "short_name": "SGT Guard",
+  "description": "แอป รปภ. — สแกน QR/NFC, ตรวจจุด, ถ่ายรูป, SOS, ตำแหน่งสด",
+  "start_url": "/guard.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b1220",
+  "theme_color": "#0b1220",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

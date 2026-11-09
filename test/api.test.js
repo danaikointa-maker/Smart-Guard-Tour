@@ -592,6 +592,27 @@ test('migration SQL ครบทุกตารางตาม db.js + deploy do
     assert.ok(dep.includes(kw), 'deploy.md ขาดหัวข้อ ' + kw);
 });
 
+test('PWA/TWA พร้อม: manifest valid + ไอคอนมี + assetlinks endpoint ทำงาน', async () => {
+  const m = await api('GET', '/manifest.webmanifest');
+  assert.equal(m.status, 200);
+  assert.equal(m.j.display, 'standalone');
+  assert.ok(m.j.icons.some(i => i.sizes === '512x512'), 'ต้องมีไอคอน 512');
+  assert.equal(m.j.start_url, '/guard.html');
+  for (const ic of ['/icon-192.png', '/icon-512.png']) {
+    const r = await fetch(BASE + ic);
+    assert.equal(r.status, 200, ic + ' ต้องเสิร์ฟได้');
+  }
+  const a0 = await api('GET', '/.well-known/assetlinks.json');
+  assert.equal(a0.status, 404);
+  const a = await api('POST', '/api/login', { name: 'admin', pin: 'admin123' });
+  await api('PUT', '/api/admin/settings', { twa_sha256_fingerprint: 'AA:BB:CC:TEST' }, a.j.token);
+  const a1 = await api('GET', '/.well-known/assetlinks.json');
+  assert.equal(a1.status, 200);
+  assert.equal(a1.j[0].target.sha256_cert_fingerprints[0], 'AA:BB:CC:TEST');
+  assert.ok(a1.j[0].target.package_name.includes('smartguardtour'));
+  await api('PUT', '/api/admin/settings', { twa_sha256_fingerprint: '' }, a.j.token);
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {
