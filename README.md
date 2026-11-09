@@ -89,7 +89,7 @@ docker compose up --build    # เปิดที่ http://localhost:3000
 
 ## 🧪 ทดสอบอัตโนมัติ
 ```bash
-npm test     # 39 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
+npm test     # 40 เคส: flow รปภ. ครบ, geofence, QR ปลอม, สิทธิ์, privacy ลูกบ้าน, xlsx, SSO
 ```
 
 ## 🏭 พร้อมโปรดักชัน
@@ -101,6 +101,9 @@ npm test     # 39 เคส: flow รปภ. ครบ, geofence, QR ปลอ�
 
 ## 🔐 SSO ผ่าน VVA
 เปิดใน ⚙️ ตั้งค่า → `sso_enabled = true` แล้วหน้าล็อกอินทุกหน้าจะมีปุ่ม **🔐 เข้าด้วย SSO** — ต้นแบบจำลอง VVA ด้วย signed token (`/api/sso/mock-issue` → `/api/sso/login`, ผูกบัญชีด้วย `vva_user_id`) — โปรดักชันสลับเป็น OAuth2/OIDC จริงได้เลย
+
+## 📱 TWA — เว็บแอปขึ้น Google Play เป็น APK/AAB
+`manifest.webmanifest` + ไอคอน 512px พร้อมแล้ว; คู่มือ Bubblewrap + Digital Asset Links (`/.well-known/assetlinks.json` route พร้อม) อยู่ที่ `docs/twa.md`
 
 ## 📱 Native Mobile App (Flutter)
 โค้ดอยู่ที่ `apps/mobile/` — รองรับ **Background GPS ขณะล็อกจอ** (Foreground Service + `background_locator` ตามนโยบาย Google Play) + คิวออฟライン + SSO

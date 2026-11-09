@@ -243,6 +243,7 @@ db.prepare("UPDATE posts SET qr_issued_at=created_at WHERE qr_issued_at IS NULL"
     ['sms_gateway_url', '', 'SMS gateway สำรองตอน SOS (เว้นว่าง = ปิด) — เช่น https://sms.example.com/send'],
     ['sms_api_key', '', 'API key ของ SMS gateway (ส่งเป็น Bearer token)'],
     ['sms_sos_numbers', '', 'เบอร์รับ SMS ตอน SOS — คั่นด้วยจุลภาค เช่น 0812345678,0898765432'],
+    ['twa_sha256_fingerprint', '', 'TWA: SHA-256 fingerprint ของ signing key (จาก Play Console) — ใส่เพื่อเสิร์ฟ /.well-known/assetlinks.json'],
     ['gps_min_distance_m', '10', 'ส่ง GPS เมื่อขยับอย่างน้อย (เมตร)'],
     ['default_post_radius_m', '30', 'รัศมีเริ่มต้นของป้อม/QR (เมตร)'],
     ['default_checkpoint_radius_m', '100', 'รัศมีเริ่มต้นของจุดตรวจ (เมตร)'],
