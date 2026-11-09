@@ -519,6 +519,14 @@ test('Flutter app build-ready: มีโครง android/ (Gradle) ครบ + 
   assert.ok(appGradle.includes('com.android.application') && appGradle.includes('dev.flutter.flutter-gradle-plugin'));
 });
 
+test('ประหยัดดาต้าซิม: settings มี gps_min_move_m/photo_max_px + หน้า รปภ. มี resizePhoto + ส่ง GPS ตามระยะทาง', async () => {
+  const st = await api('GET', '/api/settings');
+  assert.ok(st.j.gps_min_move_m != null && st.j.photo_max_px != null, 'ต้องมี setting ประหยัดดาต้า');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'guard.js'), 'utf8');
+  assert.ok(js.includes('resizePhoto'), 'ต้องมีฟังก์ชัน resize รูปก่อนส่ง');
+  assert.ok(js.includes('gps_min_move_m') && js.includes('lastPosSent'), 'ต้องส่ง GPS ตามการขยับ');
+});
+
 test('login rate limit — ยิง 12 ครั้งต้องโดน 429', async () => {
   let last = 0;
   for (let i = 0; i < 12; i++) {

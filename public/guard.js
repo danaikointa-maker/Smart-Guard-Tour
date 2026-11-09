@@ -9,7 +9,7 @@ const S = { token: localStorage.getItem('sgt_token') || '', me: null, shift: nul
   checkpoints: [], visits: new Set(), myPos: null, ws: null, map: null, myMarker: null,
   cpMarkers: {}, watchId: null, lastSent: 0, scanTimer: null, camStream: null, shotCp: null, shotData: null, routeOrder: new Map(), lastRoute: 0,
   cfg: { gps_interval_sec: 4 }, pending: new Set(), batt: null,
-  queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]'), shotFlags: [] };
+  queue: JSON.parse(localStorage.getItem('sgt_queue') || '[]'), shotFlags: [], lastPosSent: null };
 
 async function api(path, body) {
   const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-token': S.token },
@@ -123,7 +123,11 @@ function startGPS() {
     $('myacc').textContent = `±${Math.round(S.myPos.acc)} ม.`;
     updateMap(); renderCpList();
     const t = Date.now();
-    if (t - S.lastSent > (Number(S.cfg.gps_interval_sec) || 4) * 1000) { S.lastSent = t; sendPos(); }
+    if (t - S.lastSent > (Number(S.cfg.gps_interval_sec) || 4) * 1000) {
+      const minMove = Number(S.cfg.gps_min_move_m) || 0;
+      const moved = !S.lastPosSent || hav(S.lastPosSent.lat, S.lastPosSent.lng, S.myPos.lat, S.myPos.lng) > minMove;
+      if (moved) { S.lastSent = t; S.lastPosSent = { ...S.myPos }; sendPos(); }
+    }
     if (t - S.lastRoute > 15000) { S.lastRoute = t; loadRoute(); }
   }, (e) => toast('GPS: ' + e.message), { enableHighAccuracy: true, maximumAge: 1000, timeout: 20000 });
 }
@@ -201,6 +205,23 @@ function hav(a, b, c, d) { const R = 6371000, r = x => x * Math.PI / 180;
   const dLat = r(c - a), dLng = r(d - b);
   return 2 * R * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(r(a)) * Math.cos(r(c)) * Math.sin(dLng / 2) ** 2)); }
 
+// ---------- ประหยัดดาต้าซิม: resize รูปก่อนส่ง ----------
+function resizePhoto(dataUrl, maxPx) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      if (scale >= 1) return resolve(dataUrl);
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', 0.75));
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 function renderCpList() {
   const el = $('cp-list'); el.innerHTML = '';
   let done = 0;
@@ -243,11 +264,12 @@ async function openCamFor(cpId) {
     const v = $('cam-shot'); v.srcObject = st; S.shotStream = st; await v.play();
   } catch (e) { toast('เปิดกล้องไม่ได้: ' + e.message); }
 }
-function shoot() {
+async function shoot() {
   const v = $('cam-shot'), c = $('canvas-shot');
   c.width = v.videoWidth; c.height = v.videoHeight;
   c.getContext('2d').drawImage(v, 0, 0);
   S.shotData = c.toDataURL('image/jpeg', 0.8);
+  S.shotData = await resizePhoto(S.shotData, Number(S.cfg.photo_max_px) || 800);
   $('img-shot').src = S.shotData; $('img-shot').classList.remove('hidden');
   $('cam-shot').classList.add('hidden');
   $('btn-shoot').classList.add('hidden'); $('btn-send').classList.remove('hidden');
@@ -360,10 +382,10 @@ async function incShoot() {
   try {
     const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
     const v = $('cam-inc'); v.srcObject = st; v.classList.remove('hidden'); await v.play();
-    setTimeout(() => {
+    setTimeout(async () => {
       const c = document.createElement('canvas'); c.width = v.videoWidth; c.height = v.videoHeight;
       c.getContext('2d').drawImage(v, 0, 0);
-      incPhoto = c.toDataURL('image/jpeg', 0.8);
+      incPhoto = await resizePhoto(c.toDataURL('image/jpeg', 0.8), Number(S.cfg.photo_max_px) || 800);
       $('img-inc').src = incPhoto; $('img-inc').classList.remove('hidden'); v.classList.add('hidden'); stopIncCam();
     }, 600);
   } catch (e) { toast('เปิดกล้องไม่ได้: ' + e.message); }
