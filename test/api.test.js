@@ -204,7 +204,9 @@ test('openapi.json valid และมี path สำคัญ', async () => {
   const r = await fetch(BASE + '/api/openapi.json');
   const j = await r.json();
   assert.equal(j.openapi, '3.0.3');
-  for (const p of ['/api/login', '/api/guard/checkin', '/api/guard/visit', '/api/guard/checkout', '/ws'])
+  for (const p of ['/api/login', '/api/guard/checkin', '/api/guard/visit', '/api/guard/checkout', '/ws',
+    '/api/guard/route', '/api/guard/sync', '/api/public/summary', '/api/push/vapid-key',
+    '/api/admin/webhooks', '/api/admin/webhooks/deliveries', '/api/admin/guards-status', '/api/admin/guard-stats'])
     assert.ok(j.paths[p], 'missing ' + p);
 });
 
